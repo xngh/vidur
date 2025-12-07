@@ -35,6 +35,7 @@ class BaseReplicaScheduler(ABC):
             self._request_generator_config.max_tokens // self._config.block_size
         )
 
+        self._replica = replica
         memory_planner = MemoryPlanner(self._replica_config, replica)
 
         if not self._config.num_blocks:

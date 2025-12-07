@@ -251,6 +251,25 @@ class TraceRequestGeneratorConfig(BaseRequestGeneratorConfig):
     def get_type():
         return RequestGeneratorType.TRACE_REPLAY
 
+@dataclass
+class ShareGPTRequestGeneratorConfig(BaseRequestGeneratorConfig):
+    trace_file: str = field(
+        default="data/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json",
+        metadata={"help": "Path to the sharegpt trace request generator file."},
+    )
+    start_time: float = field(
+        default=0.0,
+        metadata={"help": "Start time for the sharegpt request generator."},
+    )
+    interval_generator_config: PoissonRequestIntervalGeneratorConfig = field(
+        default_factory=PoissonRequestIntervalGeneratorConfig,
+        metadata={"help": "Config for the PoissonRequestIntervalGenerator."},
+    )
+
+    @staticmethod
+    def get_type():
+        return RequestGeneratorType.UNIFIED
+
 
 @dataclass
 class BaseReplicaSchedulerConfig(BasePolyConfig):
@@ -327,6 +346,15 @@ class SarathiSchedulerConfig(BaseReplicaSchedulerConfig):
     def get_type():
         return ReplicaSchedulerType.SARATHI
 
+@dataclass
+class LocalReplicaSchedulerConfig(BaseReplicaSchedulerConfig):
+    chunk_size: int = field(
+        default=512,
+        metadata={"help": "Chunk size for Local Scheduler."},
+    )
+    @staticmethod
+    def get_type():
+        return ReplicaSchedulerType.LOCAL
 
 @dataclass
 class MetricsConfig:

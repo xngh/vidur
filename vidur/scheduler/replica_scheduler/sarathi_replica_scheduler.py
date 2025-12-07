@@ -71,9 +71,11 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
     ) -> int:
         assert not request.completed
 
+        # decode
         if request.is_prefill_complete:
             return 1
 
+        # prefill 
         next_num_tokens = min(
             request.num_prefill_tokens - request.num_processed_tokens,
             self._config.chunk_size - num_batch_tokens,
@@ -102,7 +104,8 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
             if not request.is_prefill_complete:
                 running_prefills.append(request)
                 continue
-
+            
+            # 进入decode阶段的request  这里固定返回1
             next_num_tokens = self._get_request_next_num_tokens(
                 request, contains_prefill, num_batch_tokens
             )
@@ -112,19 +115,22 @@ class SarathiReplicaScheduler(BaseReplicaScheduler):
                 continue
 
             while not self._can_allocate_request(request):
+                # 把preempted requests的最后一个放回request队列的头部
+                # 但是preept request是什么
                 if self._preempted_requests:
                     victim_request = self._preempted_requests.pop(-1)
                     victim_request.restart()
                     self.free(victim_request.id)
                     self._request_queue = [victim_request] + self._request_queue
                 else:
+                    # 如果没有可抢占的request，则把当前request放回队列的开头
                     request.restart()
                     self.free(request.id)
                     self._request_queue = [request] + self._request_queue
                     break
             else:
                 self._allocate_request(request)
-                assert request.is_prefill_complete
+                assert request.is_prefill_complete   #确保都是decode
                 num_batch_tokens += next_num_tokens
                 requests.append(request)
                 num_tokens.append(next_num_tokens)

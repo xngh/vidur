@@ -81,6 +81,11 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
             self._cpu_overhead_input_file,
         ) = self._get_input_files()
 
+        print("compute_input_file:", self._compute_input_file)
+        print("attention_input_file:", self._attention_input_file)
+        print("all_reduce_input_file:", self._all_reduce_input_file)
+        print("send_recv_input_file:", self._send_recv_input_file)
+        print("cpu_overhead_input_file:", self._cpu_overhead_input_file)
         self._models = self._train_models()
         self._predictions = self._predict_from_models()
 
