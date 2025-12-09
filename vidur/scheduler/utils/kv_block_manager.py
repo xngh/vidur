@@ -34,6 +34,9 @@ class KVBlockManager:
         # 跟踪当前分配给活跃请求的 Block ID 集合
         self.allocated_blocks: Set[int] = set()
 
+        # 跟踪每个block还有多少剩余slot，最大为block_size
+        self.block_slots: Dict[int, int] = {}
+
 
         print(f"BlockManager initialized: {self._num_total_blocks} blocks of size {self._block_size}.")
 
@@ -106,7 +109,30 @@ class KVBlockManager:
 
     def get_ref_count(self, block_id: int) -> int:
         return self.ref_counts.get(block_id, 0)
-    
+
+    def has_free_slots(self, block_id: int) -> bool:
+        if block_id not in self.block_slots:
+            raise ValueError(f"Block ID {block_id}: Block is not allocated.")
+
+        if self.block_slots[block_id] < self._block_size:
+            return True
+        else:
+            return False
+
+    def increment_slot(self, block_id: int) -> None:
+        if block_id not in self.block_slots:
+            self.block_slots[block_id] = 1
+            return
+
+        self.block_slots[block_id] += 1
+
+    def decrement_slot(self, block_id: int) -> None:
+        if block_id not in self.block_slots:
+            raise ValueError(f"Block ID {block_id}: Block is not allocated.")
+
+        self.block_slots[block_id] -= 1
+        if self.block_slots[block_id] == 0:
+            del self.block_slots[block_id]
     
     def print_status(self):
         """打印 BlockManager 的当前状态摘要。"""

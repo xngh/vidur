@@ -103,7 +103,7 @@ class TestAgentSimulator:
             self._add_event(event)
 
     def _init_event_queue(self) -> None:
-        for app in self._app_queue:
+        for _, app in self._app_queue:
             if app.arrive_at > self._time:
                 break
             requests = app.get_next_requests(self._time)  # 对于并行的情况，返回多个full_request

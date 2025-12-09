@@ -1,6 +1,7 @@
 from typing import List
 
 from vidur.entities.base_entity import BaseEntity
+from vidur.entities.full_request import FullRequest
 from vidur.entities.request import Request
 from vidur.logger import init_logger
 

@@ -265,6 +265,10 @@ class ShareGPTRequestGeneratorConfig(BaseRequestGeneratorConfig):
         default_factory=PoissonRequestIntervalGeneratorConfig,
         metadata={"help": "Config for the PoissonRequestIntervalGenerator."},
     )
+    max_tokens: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the trace request generator."},
+    )
 
     @staticmethod
     def get_type():

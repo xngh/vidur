@@ -52,7 +52,7 @@ class UnifiedRequest:
         if self.workflow_status == UnifiedRequestStatus.PENDING:
             self.workflow_status = UnifiedRequestStatus.RUNNING 
 
-    # 这个函数应该会在上一个request结束的event中调用，用于发射下一个request
+    # 这个函数应该会在上一个full_request结束的event中调用或者初始时，用于发射下一个request
     def get_next_requests(self, current_time: float) -> List[FullRequest]:
         """
         Retrieve all FullRequests that need to be initiated in the current step.

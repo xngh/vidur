@@ -103,13 +103,12 @@ class AgentSimulator:
         for event in events:
             self._add_event(event)
 
+    # TODO: 
     def _init_event_queue(self) -> None:
         for app in self._app_queue:
-            if app.arrive_at > self._time:
-                break
-            requests = app.get_next_requests(self._time)  # 对于并行的情况，返回多个full_request
+            requests = app.get_next_requests(app.arrived_at)  # 对于并行的情况，返回多个full_request
             for request in requests:
-                self._add_event(RequestArrivalEvent(request.arrived_at, request))
+                self._add_event(RequestArrivalEvent(request.arrive_at, request))
     
     def _init_app_queue(self) -> None:
         unified_requests = self._request_generator.generate()

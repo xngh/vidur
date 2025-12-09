@@ -87,6 +87,7 @@ class FullRequest(Request):
             if self._prefill_completed_at == 0:
                 self._prefill_completed_at = time
 
+
         # check if request is completed
         if self._num_processed_tokens == self.total_tokens:
             assert len(self.generated_token_ids) == len(self.output_token_ids)
@@ -142,10 +143,13 @@ class FullRequest(Request):
     # --- Utility ---
 
     def sim_output_tokens(self, num_tokens: int):
-        last = len(self.generated_token_ids) - 1
+        last = len(self.fill_ids)
         total_token_ids = self.input_token_ids + self.output_token_ids
 
+        # change fill ids
         self.fill_ids = self.fill_ids + total_token_ids[last : last + num_tokens]
+
+        # change generated_token_ids
         if self._is_prefill_complete:
             last_decode = len(self.generated_token_ids)
             self.generated_token_ids = self.generated_token_ids + total_token_ids[
