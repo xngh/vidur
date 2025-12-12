@@ -3,7 +3,7 @@ import heapq
 import json
 from typing import List
 
-from vidur.config import SimulationConfig
+from vidur.config import SimulationConfig, HeterClusterConfig
 from vidur.entities import Cluster
 from vidur.events import BaseEvent, RequestArrivalEvent
 from vidur.logger import init_logger
@@ -29,11 +29,19 @@ class Simulator:
         self._event_trace = []
         self._event_chrome_trace = []
 
-        self._cluster = Cluster(
-            self._config.cluster_config,
-            self._config.metrics_config,
-            self._config.request_generator_config,
-        )
+        # 同构/异构分支：HeterClusterConfig 走 from_heter_config，否则走原逻辑
+        if isinstance(self._config.cluster_config, HeterClusterConfig):
+            self._cluster = Cluster.from_heter_config(
+                self._config.cluster_config,
+                self._config.metrics_config,
+                self._config.request_generator_config,
+            )
+        else:
+            self._cluster = Cluster(
+                self._config.cluster_config,
+                self._config.metrics_config,
+                self._config.request_generator_config,
+            )
         self._metric_store = MetricsStore(self._config)
         self._request_generator = RequestGeneratorRegistry.get(
             self._config.request_generator_config.get_type(),

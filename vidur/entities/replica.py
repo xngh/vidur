@@ -105,9 +105,13 @@ class Replica(BaseEntity):
     def per_device_flops(self) -> float:
         return self._device_config.fp16_tflops * 2**40
 
+    #vidur原to_dict方法没有输出device等信息，这里也添加进去了。
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "model_name": self._replica_config.model_name,
+            "device": self._replica_config.device,
+            "network_device": self._replica_config.network_device,
             "num_layers": self.num_layers,
             "num_q_heads": self.num_q_heads,
             "num_kv_heads": self.num_kv_heads,
@@ -117,4 +121,15 @@ class Replica(BaseEntity):
             "vocab_size": self.vocab_size,
             "num_pipeline_stages": self.num_pipeline_stages,
             "num_tensor_parallel_workers": self.num_tensor_parallel_workers,
+            # hardware details
+            "device_config": {
+                "fp16_tflops": self._device_config.fp16_tflops,
+                "total_memory_gb": self._device_config.total_memory_gb,
+                "name": getattr(self._device_config, "name", None),
+            },
+            "node_config": {
+                "num_devices_per_node": self._replica_config.node_config.num_devices_per_node,
+                "device_sku_type": getattr(self._replica_config.node_config, "device_sku_type", None),
+                "name": getattr(self._replica_config.node_config, "name", None),
+            },
         }

@@ -1,5 +1,7 @@
 import json
 import os
+import argparse
+import sys
 from abc import ABC
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -654,6 +656,19 @@ class ClusterConfig:
         metadata={"help": "Replica scheduler config."},
     )
 
+#异构集群配置
+@dataclass
+class HeterClusterConfig:
+    replica_configs: List[ReplicaConfig] = field(default_factory=list)
+    global_scheduler_config: BaseGlobalSchedulerConfig = field(
+        default_factory=RoundRobinGlobalSchedulerConfig,
+        metadata={"help": "Global scheduler config."}
+    )
+    replica_scheduler_config: BaseReplicaSchedulerConfig = field(
+        default_factory=SarathiSchedulerConfig,
+        metadata={"help": "Replica scheduler config."}
+    )
+
 
 @dataclass
 class SimulationConfig(ABC):
@@ -696,6 +711,33 @@ class SimulationConfig(ABC):
         instance.__flat_config__ = flat_config
         return instance
 
+    @classmethod
+    def create_from_cli_args_heter_full(cls):
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument('--cluster_config_replica_configs', type=str, default=None)
+        args, remaining = parser.parse_known_args()
+
+        heter_cluster_config = None
+        if args.cluster_config_replica_configs:
+            replica_items = json.loads(args.cluster_config_replica_configs)
+            replica_configs = []
+            for item in replica_items:
+                count = item.pop("count", 1)
+                for _ in range(count):
+                    replica_configs.append(ReplicaConfig(**item))
+            heter_cluster_config = HeterClusterConfig(replica_configs=replica_configs)
+
+        # 构造剩余参数
+        # 把已消费的自定义参数从 sys.argv 剥离，避免后续 argparse 报 unknown arguments。这里的sys,argv[0]是脚本名，必须保留。
+        sys.argv = [sys.argv[0]] + remaining
+        flat_config = create_flat_dataclass(cls).create_from_cli_args()
+        instance = flat_config.reconstruct_original_dataclass()
+        instance.__flat_config__ = flat_config
+        # 覆盖cluster_config为heter_cluster_config
+        if heter_cluster_config is not None:
+            instance.cluster_config = heter_cluster_config
+        return instance
+
     def to_dict(self):
         if not hasattr(self, "__flat_config__"):
             logger.warning("Flat config not found. Returning the original config.")
@@ -707,3 +749,18 @@ class SimulationConfig(ABC):
         config_dict = dataclass_to_dict(self)
         with open(f"{self.metrics_config.output_dir}/config.json", "w") as f:
             json.dump(config_dict, f, indent=4)
+
+
+if __name__ == "__main__":
+    import sys
+    import json as pyjson
+    from vidur.config.utils import dataclass_to_dict
+    # 单测，模拟命令行参数
+    sys.argv = [
+        "config.py",
+        "--cluster_config_replica_configs",
+        '[{"device": "h100", "network_device": "h100_pairwise_nvlink","model_name": "Qwen/Qwen-72B", "count": 1}, {"device": "a100", "network_device": "a100_pairwise_nvlink","model_name": "meta-llama/Llama-2-7b-hf", "count": 1}]'
+    ]
+    config = SimulationConfig.create_from_cli_args_heter_full()
+    # print(pyjson.dumps(config.to_dict(), indent=2, ensure_ascii=False)) #这个是打印flat后的config
+    print(pyjson.dumps(dataclass_to_dict(config), indent=2, ensure_ascii=False)) #打印原始的config，嵌套dict

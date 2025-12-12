@@ -4,8 +4,9 @@ from vidur.utils.random import set_seeds
 
 
 def main() -> None:
-    config: SimulationConfig = SimulationConfig.create_from_cli_args()
-
+    # config: SimulationConfig = SimulationConfig.create_from_cli_args()
+    config: SimulationConfig = SimulationConfig.create_from_cli_args_heter_full()
+    
     set_seeds(config.seed)
 
     simulator = Simulator(config)

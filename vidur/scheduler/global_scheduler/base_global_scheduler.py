@@ -16,25 +16,25 @@ class BaseGlobalScheduler(ABC):
 
         self._num_replicas = len(self._replicas)
 
-        execution_time_predictor = ExecutionTimePredictorRegistry.get(
-            config.execution_time_predictor_config.get_type(),
-            predictor_config=config.execution_time_predictor_config,
-            replica_config=config.cluster_config.replica_config,
-            replica_scheduler_config=config.cluster_config.replica_scheduler_config,
-            metrics_config=config.metrics_config,
-        )
-        self._replica_schedulers = {
-            replica_id: ReplicaSchedulerRegistry.get(
+        # 为每个 replica 构建独立的 execution_time_predictor 与 replica_scheduler
+        self._replica_schedulers = {}
+        for replica_id, replica in replicas.items():
+            etp = ExecutionTimePredictorRegistry.get(
+                config.execution_time_predictor_config.get_type(),
+                predictor_config=config.execution_time_predictor_config,
+                replica_config=replica._replica_config,  # 使用该 replica 的配置
+                replica_scheduler_config=config.cluster_config.replica_scheduler_config,
+                metrics_config=config.metrics_config,
+            )
+            self._replica_schedulers[replica_id] = ReplicaSchedulerRegistry.get(
                 config.cluster_config.replica_scheduler_config.get_type(),
-                replica_config=config.cluster_config.replica_config,
+                replica_config=replica._replica_config,  # 使用该 replica 的配置
                 replica_scheduler_config=config.cluster_config.replica_scheduler_config,
                 request_generator_config=config.request_generator_config,
                 replica=replica,
                 num_stages=replica.num_pipeline_stages,
-                execution_time_predictor=execution_time_predictor,
+                execution_time_predictor=etp,
             )
-            for replica_id, replica in replicas.items()
-        }
         self._request_queue = []
 
     def sort_requests(self) -> None:

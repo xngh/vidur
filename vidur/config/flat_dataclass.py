@@ -135,7 +135,10 @@ def create_from_cli_args(cls) -> Any:
 
     return cls(**vars(args))
 
-
+'''
+从命令行参数创建FlatClass实例,FlatClass是所有命令行参数都存到一个单级dict里,没有嵌套类。
+后面再通过reconstruct_original_dataclass方法从FlatClass实例恢复出原始的dataclass实例,也就是多级嵌套dict。
+'''
 def create_flat_dataclass(input_dataclass: Any) -> Any:
     """
     Creates a new FlatClass type by recursively flattening the input dataclass.

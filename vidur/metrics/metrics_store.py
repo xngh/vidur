@@ -6,7 +6,7 @@ import pandas as pd
 import plotly_express as px
 import wandb
 
-from vidur.config import SimulationConfig
+from vidur.config import HeterClusterConfig, SimulationConfig
 from vidur.entities import Batch, BatchStage, ExecutionTime, Request
 from vidur.logger import init_logger
 from vidur.metrics.cdf_sketch import CDFSketch
@@ -54,11 +54,27 @@ class MetricsStore:
         self._config = self._simulation_config.metrics_config
         self._last_request_arrived_at = None
 
-        # copy config
-        self._num_replicas = self._simulation_config.cluster_config.num_replicas
-        self._num_pipeline_stages = (
-            self._simulation_config.cluster_config.replica_config.num_pipeline_stages
-        )
+        # copy config（兼容异构集群）
+        cluster_cfg = self._simulation_config.cluster_config
+        if isinstance(cluster_cfg, HeterClusterConfig):
+            self._num_replicas = len(cluster_cfg.replica_configs)
+            # TODO _num_pipeline_stages_per_replica是新增属性，当不同模型的PP方式不同时，需要使用这一属性。目前不PP暂时用不上。
+            self._num_pipeline_stages_per_replica = [
+                rc.num_pipeline_stages for rc in cluster_cfg.replica_configs
+            ]
+            # 为保持与旧逻辑的兼容，仍保留一个聚合值（取最大）
+            self._num_pipeline_stages = (
+                max(self._num_pipeline_stages_per_replica)
+                if self._num_pipeline_stages_per_replica
+                else 1
+            )
+        else:
+            #原有同构集群构造逻辑
+            self._num_replicas = cluster_cfg.num_replicas
+            self._num_pipeline_stages = cluster_cfg.replica_config.num_pipeline_stages
+            self._num_pipeline_stages_per_replica = [
+                self._num_pipeline_stages for _ in range(self._num_replicas)
+            ]
 
         # Initialise request metrics
         self._request_metrics_time_distributions: Dict[
@@ -193,16 +209,26 @@ class MetricsStore:
                 self._config.store_plots,
             )
 
+        # 兼容异构：为每个 replica 准备独立的配置与计算器
+        if isinstance(cluster_cfg, HeterClusterConfig):
+            self._replica_configs_for_metrics = list(cluster_cfg.replica_configs)
+        else:
+            self._replica_configs_for_metrics = [
+                cluster_cfg.replica_config for _ in range(self._num_replicas)
+            ]
+
         # per replica metrics
         self._replica_memory_usage = []
         # per replica stage metrics
         self._replica_busy_time = []
         self._replica_mfu = []
-        self._mfu_calculator = MFUCalculator(
-            self._simulation_config.cluster_config.replica_config
-        )
+        # MFU: Model FLOPS Utilization，每种replica配置要创建一个独立的MFUCalculator
+        self._mfu_calculators = [
+            MFUCalculator(rc) for rc in self._replica_configs_for_metrics
+        ]
 
-        for replica_idx in range(self._num_replicas):
+        for replica_idx, rc in enumerate(self._replica_configs_for_metrics):
+            stage_count = rc.num_pipeline_stages
             self._replica_memory_usage.append(
                 SeriesAverageMeter(
                     TIME_STR,
@@ -215,7 +241,7 @@ class MetricsStore:
             self._replica_busy_time.append([])
             self._replica_mfu.append([])
 
-            for stage_idx in range(self._num_pipeline_stages):
+            for stage_idx in range(stage_count):
                 self._replica_busy_time[replica_idx].append(
                     SeriesAverageMeter(
                         TIME_STR,
@@ -463,7 +489,10 @@ class MetricsStore:
             self._replica_memory_usage[replica_idx].print_stats(
                 f"replica_{replica_idx + 1}_memory_usage", base_plot_path
             )
-            for stage_idx in range(self._num_pipeline_stages):
+            stage_count = self._replica_configs_for_metrics[
+                replica_idx
+            ].num_pipeline_stages
+            for stage_idx in range(stage_count):
                 self._replica_busy_time[replica_idx][stage_idx].print_stats(
                     f"replica_{replica_idx + 1}_stage_{stage_idx + 1}_busy_time_percent",
                     base_plot_path,
@@ -700,7 +729,7 @@ class MetricsStore:
             return
 
         self._replica_busy_time[replica_id - 1][stage_id - 1].put(time, 100)
-        mfu = self._mfu_calculator.get_mfu(batch_stage)
+        mfu = self._mfu_calculators[replica_id - 1].get_mfu(batch_stage)
         self._replica_mfu[replica_id - 1][stage_id - 1].put(time, mfu)
 
         if not self._config.store_operation_metrics:
