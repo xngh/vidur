@@ -30,10 +30,11 @@ from typing import Tuple, Dict
 from vidur.scheduler.utils.prefix_cache import BasePrefixCache
 from vidur.scheduler.utils.kv_block_manager import KVBlockManager
 
-from vidur.entities.unified_request import UnifiedRequest
 from vidur.entities.full_request import FullRequest
 from functools import lru_cache, partial
+from vidur.logger import init_logger
 
+logger = init_logger(__name__)
 
 # python -m vidur.scheduler.utils.radix_tree
 # https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/mem_cache/radix_cache.py#L358
@@ -124,7 +125,6 @@ class RadixCache(BasePrefixCache):
         page_aligned_len = len(key) // self.page_size * self.page_size
         return key[:page_aligned_len]
 
-    # TODO(yinhan): 输入 key 是 token_ids， 返回 ? 还没想好
     def match_prefix(self, key: List, **kwargs) -> Tuple[List, TreeNode]:
         if self.disable or len(key) == 0:
             return [], self.root_node
@@ -144,7 +144,7 @@ class RadixCache(BasePrefixCache):
             return 0
         
         if value is None:
-            value = torch.tensor(key, dtype=torch.int64)
+            raise TypeError("value cannot be None")
 
         return self._insert_helper(self.root_node, key, value)
 
@@ -168,58 +168,26 @@ class RadixCache(BasePrefixCache):
 
         # Radix Cache takes one ref in memory pool
         if is_insert:
-            new_prefix_len = self.insert(keys, values, priority=0)
+            new_prefix_len = self.insert(keys, values, priority=0)    # 每次 insert 都会给新的node的block的id + 1
             # Free the duplicates that were already in the tree
 
         # Remove req slot release the cache lock
+        # 在local_scheduler 处 free block
         self.dec_lock_ref(req.last_node)
 
-    def cache_unfinished_req(self, req: FullRequest, token_ids: Optional[List[int]] = None):
-        """Cache request when it is unfinished."""
-        if self.disable:
-            return
 
-        if token_ids is None:
-            token_ids = req.fill_ids
-
-        #kv_indices = self.req_to_token_pool.req_to_token[ #获取当前 request 的 kv_indices（kv在kv_pool中的位置）
-        #    req.req_pool_idx, : len(token_ids)
-        #]
-        block_ids = req.get_block_table()[: len(token_ids)]
-        # Radix Cache takes one ref in memory pool
-        # 将当前 request 的 token_ids 和 block ids 插入到 radix cache 中, 并获取新的 prefix_len(表示前面 prefix_len 个 token 的 kv 对应的 block id已经存在了)
-        new_prefix_len = self.insert(token_ids, block_ids.clone()) 
-        #self.token_to_kv_pool.free(kv_indices[len(req.prefix_indices) : new_prefix_len]) # 释放掉重复的 token 的 kv
-
-        # The prefix indices could be updated, reuse it
-        new_indices, new_last_node = self.match_prefix(token_ids) # 获取 prompt_token_ids 对应的 block_ids
-        assert len(new_indices) == len(token_ids) # 因为 prompt_token_ids 已经都存入了 radix cache 中，所以这里必须向相等
-        #self.req_to_token_pool.req_to_token[
-        #    req.req_pool_idx, len(req.prefix_indices) : len(new_indices)
-        #] = new_indices[len(req.prefix_indices) :] # 更新该请求的 prompt 对应的 kv indices
-        req.get_block_table()[len(req.prefix_indices) : len(new_indices)] = new_indices[len(req.prefix_indices) :]
-        
-
-        self.dec_lock_ref(req.last_node)
-        self.inc_lock_ref(new_last_node)
-        req.prefix_indices = new_indices
-        req.last_node = new_last_node # 更新最后一个匹配上的节点
-    
+    # TODO(yinhan): 感觉这里需要对block进行操作，就像SGlang中一样
     def cache_unfinished_req(self, req: FullRequest, chunked=False):
         """Cache request when it is unfinished."""
         if self.disable:
             return
 
         token_ids = req.fill_ids
-        #kv_indices = self.req_to_token_pool.req_to_token[
-        #    req.req_pool_idx, : len(token_ids)
-        #]
         block_ids = req.get_block_table()[: len(token_ids)]
 
         keys = req.fill_ids
         # for len(token_ids) < page_size, SGLang doesn't insert these token into the radix tree
         keys = self._page_align_keys(keys)
-        #values = kv_indices[: len(keys)].to(dtype=torch.int64, copy=True)
         values = block_ids[: len(keys)]
 
         # Radix Cache takes one ref in memory pool
@@ -230,18 +198,27 @@ class RadixCache(BasePrefixCache):
             priority=getattr(req, "priority", 0) or 0,
         )
 
-
         # The prefix indices could be updated, reuse it
         (new_indices, new_last_node) = self.match_prefix(keys)
 
-        print(f"new indices: {new_indices}")
-        print(f"token ids: {keys}")
-        assert len(new_indices) == len(keys), f"{len(new_indices)=}, {len(keys)=}"
+        logger.debug(f"new indices: {new_indices}")
+        logger.debug(f"token ids: {keys}")
+
+        assert len(new_indices) == len(keys), f"{len(new_indices)=}, {len(keys)=}, {len(block_ids)=}"
 
         #self.req_to_token_pool.req_to_token[
         #    req.req_pool_idx, len(req.prefix_indices) : len(new_indices)
         #] = new_indices[len(req.prefix_indices) :]
-        req.get_block_table()[len(req.prefix_indices) : len(new_indices)] = new_indices[len(req.prefix_indices) :]
+        # req.get_block_table()[len(req.prefix_indices) : len(new_indices)] = new_indices[len(req.prefix_indices) :]
+
+        # if there is a node which have cache the keys, use the origin block in the node.value
+        # this case only happened in decode request, when the output_len % block_size == 0
+        block_table = req.get_block_table()
+        if block_table[: len(new_indices)] != new_indices:
+            self.block_manager.decrement_ref_for_blocks(block_table[: len(new_indices)])
+            self.block_manager.increment_ref_for_blocks(new_indices)
+
+        req.get_block_table()[: len(new_indices)] = new_indices
 
         self.dec_lock_ref(req.last_node)
         self.inc_lock_ref(new_last_node)
@@ -291,7 +268,6 @@ class RadixCache(BasePrefixCache):
     def _evict_block(self, block_ids: List[int]):
         uni_block_ids = set(block_ids)
         for block_id in uni_block_ids:
-
             assert self.block_manager.ref_counts[block_id] == 1    # 只剩下radix tree 引用该 block
             self.block_manager.free_block(block_id)
 
@@ -320,6 +296,11 @@ class RadixCache(BasePrefixCache):
                 self.evictable_size_ += len(node.value)
                 delta += len(node.value)
             node.lock_ref -= 1
+
+            if node.parent is None:
+                assert (
+                        node is self.root_node
+                ), f"This request holds the node from another tree"
             node = node.parent
         return delta
 
@@ -372,7 +353,7 @@ class RadixCache(BasePrefixCache):
 
     # 我的设想是每个节点的value存储的是 block id，就是这个节点的kv所对应的block的序号
     # 这里应该要传入整个路径的value，一个新的 req 的 block id 应该是从 radix tree 中复用 + 新申请的
-    def _insert_helper(self, node: TreeNode, key: List, value):
+    def _insert_helper(self, node: TreeNode, key: List, value: List):
         access_time = time.time()
         node.last_access_time = access_time
         if len(key) == 0:
@@ -380,6 +361,8 @@ class RadixCache(BasePrefixCache):
 
         child_key = self.get_child_key_fn(key)
 
+        if 7951 in value:
+            print(" ")
         total_prefix_length = 0
 
         while len(key) > 0 and child_key in node.children.keys():

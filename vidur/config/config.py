@@ -356,6 +356,14 @@ class LocalReplicaSchedulerConfig(BaseReplicaSchedulerConfig):
         default=512,
         metadata={"help": "Chunk size for Local Scheduler."},
     )
+    bin_width: int = field(
+        default= 256,
+        metadata={"help": "Bin width for describe requests' token distribution."},
+    )
+    max_tokens_per_request: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the request in trace."},
+    )
     @staticmethod
     def get_type():
         return ReplicaSchedulerType.LOCAL
@@ -521,6 +529,12 @@ class LORGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
     def get_type():
         return GlobalSchedulerType.LOR
 
+@dataclass
+class RLGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
+    @staticmethod
+    def get_type():
+        return GlobalSchedulerType.RL
+
 
 @dataclass
 class BaseExecutionTimePredictorConfig(BasePolyConfig):
@@ -654,6 +668,41 @@ class ClusterConfig:
         metadata={"help": "Replica scheduler config."},
     )
 
+@dataclass
+class RlConfig:
+    algorithm: str = field(
+        default="dqn",
+        metadata={"help": "RL algorithm name."},
+    )
+    learning_rate: float = field(
+        default=0.01,
+        metadata={"help": "Learning rate."},
+    )
+    gamma: float = field(
+        default=0.98,
+        metadata={"help": "Gamma for algorithm."},
+    )
+    buffer_size: int = field(
+        default=10000,
+        metadata={"help": "Buffer size."},
+    )
+    hidden_dim: int = field(
+        default=256,
+        metadata={"help": "Hidden dimension."},
+    )
+    target_update_freq: int = field(
+        default=10,
+        metadata={"help": "Target update frequency."},
+    )
+    batch_size: int = field(
+        default=256,
+        metadata={"help": "Batch size."},
+    )
+    minimal_size: int = field(
+        default=500,
+        metadata={"help": "Minimal size of samples."},
+    )
+
 
 @dataclass
 class SimulationConfig(ABC):
@@ -684,6 +733,10 @@ class SimulationConfig(ABC):
     metrics_config: MetricsConfig = field(
         default_factory=MetricsConfig,
         metadata={"help": "Metrics config."},
+    )
+    rl_config: RlConfig = field(
+        default_factory=RlConfig,
+        metadata={"help": "RL config."},
     )
 
     def __post_init__(self):

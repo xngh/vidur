@@ -865,6 +865,8 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
         agg_kv_cache_size = sum(kv_cache_sizes)
         agg_prefill_chunk_size = sum([x**2 for x in prefill_chunk_sizes]) ** 0.5
 
+        assert (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2) in self._predictions["attn_prefill"], f"no data with key: {(agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)}"
+
         return self._predictions["attn_prefill"][
             (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
         ] * (

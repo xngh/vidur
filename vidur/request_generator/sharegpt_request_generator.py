@@ -1,13 +1,10 @@
 import logging
 from typing import List, Dict
-from urllib import request
 
 import pandas as pd
 
 from vidur.config import ShareGPTRequestGeneratorConfig
-from vidur.entities import Request
 from vidur.entities.unified_request import UnifiedRequest
-from vidur.entities.full_request import FullRequest
 from vidur.request_generator.base_request_generator import BaseRequestGenerator
 from vidur.request_generator.poisson_request_interval_generator import PoissonRequestIntervalGenerator
 
@@ -20,6 +17,7 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             config.interval_generator_config
         )
         self.time = config.start_time
+        self.max_tokens = config.max_tokens
 
     # TODO: 后一个request，是否需要把前一个request的input和output拼接起来作为history
     def generate_unified_request(self, arrive_at, row) -> UnifiedRequest:
@@ -55,7 +53,8 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
         request = UnifiedRequest(
             workflow_id = id,
             workflow_config=workflow_steps_config,
-            arrive_at = arrive_at
+            arrive_at = arrive_at,
+            max_token_for_request = self.max_tokens
         )
         return request
 
@@ -66,6 +65,9 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             self.time += next_time
             request = self.generate_unified_request(self.time, row)
             requests.append(request)
+
+            if len(requests) == 500:
+                break
         return requests
 
 

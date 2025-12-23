@@ -20,6 +20,7 @@ from vidur.metrics.constants import (
     RequestMetricsTimeDistributions,
     TokenCompletionMetricsTimeSeries,
     TokenMetricsTimeDistribution,
+    RlTrainingMetrics
 )
 from vidur.metrics.data_series import DataSeries
 from vidur.metrics.series_average_meter import SeriesAverageMeter
@@ -45,6 +46,7 @@ BUSY_TIME_PERCENT = "Busy Time (%)"
 UTILIZATION_STR = "Utilization (%)"
 OPERATION_STR = "Operation"
 TIME_STR_MS = "Time (ms)"
+UPDATE_TIME_STR = "Update Times"
 
 
 class MetricsStore:
@@ -233,6 +235,16 @@ class MetricsStore:
                     )
                 )
                 self._replica_mfu[replica_idx][stage_idx].put(0, 0)
+
+        self._rl_training_metrics: Dict[RlTrainingMetrics, DataSeries] = {}
+        for metric_name in RlTrainingMetrics:
+            self._rl_training_metrics[metric_name] = DataSeries(
+                UPDATE_TIME_STR,
+                metric_name.value,
+                self._config.subsamples,
+                self._config.save_table_to_wandb,
+                self._config.store_plots,
+            )
 
         self._init_wandb()
 
@@ -819,3 +831,8 @@ class MetricsStore:
             return
         self._replica_busy_time[replica_id - 1][stage_id - 1].put(time, 0)
         self._replica_mfu[replica_id - 1][stage_id - 1].put(time, 0)
+
+    @if_write_metrics
+    def on_rl_update_end(self, update_id, policy_loss)-> None:
+        self._rl_training_metrics[RlTrainingMetrics.POLICY_LOSS].put(update_id, policy_loss)
+        #self._rl_training_metrics[RlTrainingMetrics.RETURN].put()

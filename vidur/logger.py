@@ -32,7 +32,8 @@ def _setup_logger():
     if _default_handler is None:
         _default_handler = logging.StreamHandler(sys.stdout)
         _default_handler.flush = sys.stdout.flush  # type: ignore
-        _default_handler.setLevel(logging.INFO)
+        #_default_handler.setLevel(logging.INFO)
+        _default_handler.setLevel(logging.DEBUG)
         _root_logger.addHandler(_default_handler)
     fmt = NewLineFormatter(_FORMAT, datefmt=_DATE_FORMAT)
     _default_handler.setFormatter(fmt)

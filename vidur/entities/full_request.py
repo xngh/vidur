@@ -7,7 +7,7 @@ logger = init_logger(__name__)
 import torch
 from transformers import AutoTokenizer
 
-GLOBAL_TOKENIZER = AutoTokenizer.from_pretrained("bert-base-cased")
+GLOBAL_TOKENIZER = AutoTokenizer.from_pretrained("bert-base-uncased")
 
 class FullRequest(Request):
     """
@@ -23,6 +23,7 @@ class FullRequest(Request):
         output_str: str = "", # 原始期望的输出字符串
         parent_unified_request: Optional['UnifiedRequest'] = None, 
         num_processed_tokens: int = 0,
+        max_tokens: int = 4096,
     ):
         self.req_id = req_id
         self.input_str = input_str
@@ -50,18 +51,16 @@ class FullRequest(Request):
         # --- KV Cache Block ---
         # 存储分配给这个请求的 物理 Block ID
         self.block_table: List[int] = []  # 这里存储冗余的block id
-
-        # Memory pool info
-        self.req_pool_idx: Optional[int] = None
         
         self.parent_unified_request = parent_unified_request
 
         # Prefix info
         self.prefix_indices: List[int] = []    # 记录request当前处理的 token 的 block id列表, len(prefix_indices) == len(fill_ids)
-        # Number of tokens to run prefill.
-        self.extend_input_len = 0
 
         self.last_node: Any = None
+
+        self.num_matched_tokens = 0               # 用于replica_scheduler get_next_token时使用
+        self.max_tokens = max_tokens              # 用于归一化request state
     
     # --- Reload Request Methods ---
 
@@ -71,15 +70,25 @@ class FullRequest(Request):
         # super().on_batch_end(time, num_tokens_processed)
         self._num_processed_tokens += num_tokens_processed
         self._latest_iteration_completed_at = time
-        self.sim_output_tokens(num_tokens_processed)
+        self.sim_output_tokens(num_tokens_processed)   # make fill_ids matches num_tokens_processed
 
         assert self._num_processed_tokens <= self.total_tokens
+        # for prefill request matches more tokens than it can process in this chunk
+        # eg。 Assume [a b c d] has been cached。 req = [a b c d e f g h] chunk = 2
+        # num_tokens_processed may be 2, but req.num_tokens_processed should be 6
+        # that's because the reused token can be considered as zero cost
+        # (TODO: yinhan) 这里还是有点问题 把partial prefill 和 chunk太小的问题混起来了，而且两者解决方式还不一样
+        # if self.is_prefill_complete == False and self.num_processed_tokens < len(self.block_table):
+        #    self.num_processed_tokens = len(self.block_table)
+        # assert self._num_processed_tokens == len(self.block_table), f"{self._num_processed_tokens} != {len(self.block_table)}"
 
         if self._num_processed_tokens == self._num_prefill_tokens:
             self._is_prefill_complete = True
             # we get one decode token when the prefill processing completes
             self._num_processed_tokens += 1
-            self.sim_output_tokens(1)
+            # move this logic to replica_scheduler.on_batch_end
+            # because sim_output_tokens(1) without add this token to a block is incorrect
+            # self.sim_output_tokens(1)
 
             # we must record the prefill completion time only in the first time
             # in the subsequent restarts, we keep adding the previously decoded
@@ -87,15 +96,42 @@ class FullRequest(Request):
             if self._prefill_completed_at == 0:
                 self._prefill_completed_at = time
 
+        #logger.debug(f"Request #{self.req_id}'s progress: {self._num_processed_tokens} tokens processed")
 
         # check if request is completed
         if self._num_processed_tokens == self.total_tokens:
-            assert len(self.generated_token_ids) == len(self.output_token_ids)
+            # this assert is wrong for prefill-only request. At request.on_batch_end, the first output
+            # token doesn't add to self.generated_token_ids, but in replica_scheduler.on_batch_end()
+            # so I remove this assertation.
+            # assert len(self.generated_token_ids) == len(self.output_token_ids), f"{len(self.generated_token_ids)=} == {len(self.output_token_ids)=}"
             self._completed_at = time
             self._completed = True
+            self.parent_unified_request.current_step_index += 1
             logger.debug(f"Request {self._id} completed at {self._completed_at}")
-        return 
+        return
 
+    def restart(self):
+        logger.debug(f"Restarting request {self._id}")
+
+        # when we restart the request, we can process all the previously
+        # decoded tokens in parallel (i.e., we can prefill all the tokens)
+        total_tokens = self._num_prefill_tokens + self._num_decode_tokens
+        self._num_prefill_tokens = self._num_processed_tokens
+        self._num_decode_tokens = total_tokens - self._num_prefill_tokens
+        self.fill_ids = []
+        self.generated_token_ids = []
+        self.block_table = []
+        self.prefix_indices = []
+        self.last_node = None
+        self.num_matched_tokens = 0
+
+        self._num_processed_tokens = 0
+        self._scheduled = False
+        self._preempted = False
+        self._completed = False
+        self._is_prefill_complete = False
+
+        self._num_restarts += 1
 
     # --- KV Cache Block Methods ---
     
@@ -116,15 +152,6 @@ class FullRequest(Request):
         if not self.block_table:
             return None
         return self.block_table[-1]
-
-    def release_all_blocks(self, block_manager: 'KVCacheManager'):
-        """
-        Notify the BlockManager to release all physical blocks held by this request.
-        """
-        for block_id in self.block_table:
-            block_manager.free_block(block_id)
-        
-        self.block_table = []
     
     # --- Generation Methods ---
 
@@ -152,10 +179,11 @@ class FullRequest(Request):
         # change generated_token_ids
         if self._is_prefill_complete:
             last_decode = len(self.generated_token_ids)
-            self.generated_token_ids = self.generated_token_ids + total_token_ids[
+            self.generated_token_ids = self.generated_token_ids + self.output_token_ids[
                 last_decode : last_decode + num_tokens
             ]
-        
+
+
         assert len(self.fill_ids) <= len(total_token_ids)
         assert len(self.generated_token_ids) <= len(self.output_token_ids)
 
@@ -170,3 +198,17 @@ class FullRequest(Request):
             "block_table": self.block_table,
         })
         return data
+
+    def get_state(self):
+        state = []
+
+        state.append(self.pd_ratio)  # pd_ratio
+        state.append(self.num_prefill_tokens / self.max_tokens)
+        state.append(self.num_decode_tokens / self.max_tokens)
+
+        # 当前request在 workflow中的位次
+        current_progress_of_workflow = 0 if self.parent_unified_request.total_steps == 1 \
+            else self.parent_unified_request.current_step_index / (self.parent_unified_request.total_steps - 1)
+        state.append(current_progress_of_workflow)
+
+        return state

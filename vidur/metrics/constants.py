@@ -87,3 +87,8 @@ class RequestCompletionMetricsTimeSeries(enum.Enum):
 class TokenCompletionMetricsTimeSeries(enum.Enum):
     PREFILL_COMPLETIONS = "prefill_completion"
     DECODE_COMPLETIONS = "decode_completion"
+
+class RlTrainingMetrics(enum.Enum):
+    RETURN = "return"
+    POLICY_LOSS = "policy_loss"
+    VALUE_LOSS = "value_loss"

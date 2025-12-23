@@ -103,12 +103,16 @@ class AgentSimulator:
         for event in events:
             self._add_event(event)
 
-    # TODO: 
     def _init_event_queue(self) -> None:
-        for app in self._app_queue:
-            requests = app.get_next_requests(app.arrived_at)  # 对于并行的情况，返回多个full_request
+        for arrived_at, app in self._app_queue:
+            requests = app.get_next_requests(arrived_at)  # 对于并行的情况，返回多个full_request
             for request in requests:
-                self._add_event(RequestArrivalEvent(request.arrive_at, request))
+                if request.num_decode_tokens == 0 or request.num_prefill_tokens == 0:
+                    continue
+
+                assert request.num_prefill_tokens > 0, f"Request {request.id}'s input {request.input_str}"
+                assert request.num_decode_tokens > 0, f"Request {request.id}'s output is empty."
+                self._add_event(RequestArrivalEvent(arrived_at, request))
     
     def _init_app_queue(self) -> None:
         unified_requests = self._request_generator.generate()

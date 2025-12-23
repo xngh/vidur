@@ -34,8 +34,8 @@ class KVBlockManager:
         # 跟踪当前分配给活跃请求的 Block ID 集合
         self.allocated_blocks: Set[int] = set()
 
-        # 跟踪每个block还有多少剩余slot，最大为block_size
-        self.block_slots: Dict[int, int] = {}
+        # 跟踪每个block还有多少剩余slot，最大为block_size  被遗弃
+        # self.block_slots: Dict[int, int] = {}
 
 
         print(f"BlockManager initialized: {self._num_total_blocks} blocks of size {self._block_size}.")
@@ -61,10 +61,12 @@ class KVBlockManager:
         """
         if not self.free_blocks:
             raise Exception("Out of Memory: No free KV cache blocks available.")
-            
+
+
         # 从空闲池中取出 Block ID
         block_id = self.free_blocks.popleft()
-        
+
+
         # 初始化引用计数
         self.ref_counts[block_id] = 1
         self.allocated_blocks.add(block_id)
@@ -110,6 +112,18 @@ class KVBlockManager:
     def get_ref_count(self, block_id: int) -> int:
         return self.ref_counts.get(block_id, 0)
 
+    def increment_ref_for_blocks(self, block_ids: List[int]) -> None:
+        uni_block = set(block_ids)
+
+        for block_id in uni_block:
+            self.increment_ref_count(block_id)
+
+    def decrement_ref_for_blocks(self, block_ids: List[int]) -> None:
+        uni_block = set(block_ids)
+
+        for block_id in uni_block:
+            self.free_block(block_id)
+
     def has_free_slots(self, block_id: int) -> bool:
         if block_id not in self.block_slots:
             raise ValueError(f"Block ID {block_id}: Block is not allocated.")
@@ -147,40 +161,3 @@ class KVBlockManager:
         for block_id, count in sorted_refs[:5]:
             print(f"  Block {block_id}: {count} references")
         print("-" * 30)
-
-# --- 示例用法 ---
-if __name__ == "__main__":
-    BLOCK_SIZE = 16
-    TOTAL_CAPACITY = 10 
-    
-    bm = KVBlockManager(num_total_blocks=TOTAL_CAPACITY, block_size=BLOCK_SIZE)
-    bm.print_status()
-
-    # 1. 请求 A 分配 3 个 Block
-    try:
-        req_a_blocks = [bm.allocate_block() for _ in range(3)]
-        print(f"Request A allocated: {req_a_blocks}")
-    except Exception as e:
-        print(e)
-
-    # 2. 请求 B 复用 Block 0，并分配 1 个新 Block
-    reused_block_id = req_a_blocks[0]
-    bm.increment_ref_count(reused_block_id)
-    req_b_blocks = [reused_block_id, bm.allocate_block()]
-    print(f"Request B allocated: {req_b_blocks} (Block {reused_block_id} reused)")
-    
-    bm.print_status()
-
-    # 3. 请求 A 完成，释放其 Block
-    for block_id in req_a_blocks:
-        bm.free_block(block_id)
-    print(f"Request A finished. Status after freeing A:")
-    
-    bm.print_status() # Block 0 引用计数为 1，不会被回收
-
-    # 4. 请求 B 完成，释放 Block
-    for block_id in req_b_blocks:
-        bm.free_block(block_id)
-    print(f"Request B finished. Status after freeing B:")
-    
-    bm.print_status() # 所有 Block 应该都已回收
