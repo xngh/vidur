@@ -243,15 +243,10 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         # 奖励怎么考虑呢？
         # 我觉得最重要的一点就是要刻画 被选择的这个local_engine相比于其他engine的收益
         # -- a. request到这个engine他的kv复用的长度相比其他engine的kv复用长度 [归一化后 - 平均值]
-        reward = 0.0
-        reuse_kv_len = []
-        for _, replica_scheduler in self._replica_schedulers.items():
-            assert isinstance(replica_scheduler, LocalReplicaScheduler), "scheduler type error."
-            reuse_kv, _ = replica_scheduler.tree_cache.match_prefix(request.input_token_ids)
-
-            reuse_kv_len.append(len(reuse_kv))
-        # reward_of_kv = (reuse_kv_len[action] - np.mean(reuse_kv_len)) / (np.mean(reuse_kv_len) + 1e-6)
-        reward_of_kv = reuse_kv_len[action] / request.num_prefill_tokens
+        replica_scheduler = self._replica_schedulers[action]
+        assert isinstance(replica_scheduler, LocalReplicaScheduler), "scheduler type error."
+        reuse_kv_len, _ = replica_scheduler.tree_cache.match_prefix(request.input_token_ids)
+        reward_of_kv = reuse_kv_len / request.num_prefill_tokens
 
         # 用执行的速度来代替request的请求，越大越好
         # --a。 如果当前batch还未满，能够容纳request的全部prefill token，则用batch的处理时间来作为reward  TPOT
@@ -260,27 +255,78 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         # 直接参与batch
         replica_scheduler = self._replica_schedulers[action]
 
-        if replica_scheduler.num_pending_requests == 0:
-            replica_stage_scheduler = replica_scheduler.get_replica_stage_scheduler(0) # assume no parallelism
-            current_batch = replica_stage_scheduler.get_current_batch()
-            num_tokens = current_batch.num_tokens if current_batch is not None else []
-            requests = current_batch.requests if current_batch is not None else []
-            prefill_token = min(request.num_prefill_tokens - reuse_kv_len[action], self.chunk_size - sum(num_tokens))
+        # 计算current batch，要么已经组成batch，要么在preempted_queue中
+        replica_stage_scheduler = replica_scheduler.get_replica_stage_scheduler(0) # assume no parallelism
+        current_batch = replica_stage_scheduler.get_current_batch()
+        num_tokens = current_batch.num_tokens if current_batch is not None else []
+        requests = current_batch.requests if current_batch is not None else []
 
-            assert 0 <= prefill_token <= request.num_prefill_tokens
+        if hasattr(replica_scheduler, "_preempted_requests") and len(requests) == 0:
+            requests = replica_scheduler._preempted_requests
+            num_tokens = [req.num_prefill_tokens - req.num_generated_tokens for req in requests if req.is_prefill_completed is False]
 
-            fake_reqs = requests + [request]
+        prefill_token = min(request.num_prefill_tokens - reuse_kv_len[action], self.chunk_size - sum(num_tokens))
+        assert 0 <= prefill_token <= request.num_prefill_tokens
+
+        reward_of_time = 0.0
+        if prefill_token > 0:   # request可以立刻执行
+            fake_reqs = [copy.deepcopy(req) for req in requests] + [copy.deepcopy(request)]
             fake_num_tokens = num_tokens + [prefill_token]
             fake_batch = Batch(action, fake_reqs, fake_num_tokens)
             predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
                 fake_batch,
                 replica_stage_scheduler.stage_id,
             )
-
+            reward_of_time -= predict_time.total_time
         else:
-            pass
+            # 排队时间
+            # 简单用 waiting queue的所有的request的prefill token，去算需要多少个chunk，轮到当前request
+            fake_reqs = [copy.deepcopy(req) for req in requests]
+            fake_num_tokens = num_tokens
 
-        return reward_of_kv
+            waiting_time = 0.0
+            pending_requests = [copy.deepcopy(req) for req in replica_scheduler._request_queue]
+
+            while len(pending_requests) > 0:
+
+                if self.chunk_size - sum(fake_num_tokens) > 0:
+                    req = pending_requests.pop(0)
+                    prefill_token = min(req.num_prefill_tokens,
+                                        self.chunk_size - sum(num_tokens))
+
+                    fake_reqs.append(req)
+                    fake_num_tokens.append(prefill_token)
+
+
+                fake_batch = Batch(action, fake_reqs, fake_num_tokens)
+
+                predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
+                        fake_batch,
+                        replica_stage_scheduler.stage_id,
+                    )
+
+                waiting_time += predict_time.total_time
+
+                for req, token_len in zip(fake_reqs, fake_num_tokens):
+                    req.num_prefill_tokens -= token_len
+
+                    if req.num_prefill_tokens == 0:
+                        fake_reqs.remove(req)
+                        fake_num_tokens.remove(token_len)
+
+            reward_of_time -= waiting_time
+
+        # evict block's penalty
+        reward_of_evict = 0.0
+
+        num_required_blocks = (request.num_prefill_tokens - reuse_kv_len) // self._config.cluster_config.replica_scheduler_config.block_size
+        num_blocks_left = replica_scheduler.block_manager.num_total_blocks - replica_scheduler.block_manager.num_used_blocks \
+                          - num_required_blocks
+        num_blocks_evict = max(0, replica_scheduler.watermark_blocks - num_blocks_left)
+        reward_of_evict = num_blocks_evict * 0.0001
+
+        logger.debug(f"reward_of_kv: {reward_of_kv}, reward_of_evict: {reward_of_evict}, reward_of_time: {reward_of_time}")
+        return reward_of_kv + reward_of_time + reward_of_evict
 
     def step(self, action, request: FullRequest):
         target_scheduler = self.get_replica_scheduler(action)

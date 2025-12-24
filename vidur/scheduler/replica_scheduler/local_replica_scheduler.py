@@ -113,7 +113,9 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         reused_block_ids, last_node_match = self.tree_cache.match_prefix(
             request.input_token_ids
         )
-        request.prefix_indices = reused_block_ids
+        if request.last_node is None:
+            request.last_node = last_node_match
+            request.prefix_indices = reused_block_ids
 
         num_matched_blocks = len(set(reused_block_ids))
         request.num_matched_tokens = len(reused_block_ids)
@@ -149,8 +151,10 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         reused_block_ids, last_node_match = self.tree_cache.match_prefix(
             request.input_token_ids
         )
+        if request.last_node is None:
+            request.last_node = last_node_match
+            request.prefix_indices = reused_block_ids
 
-        request.last_node = last_node_match
         num_matched_blocks = len(set(reused_block_ids))
         if len(request.block_table) == 0 and len(reused_block_ids) > 0:
             request.set_block_table(reused_block_ids)
@@ -399,7 +403,6 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             _ = self._allocation_map.pop(request.id)
 
             # block.ref_count - 1
-
             uni_blocks = set(request.block_table)
             for block_id in uni_blocks:
                 self.block_manager.free_block(block_id)
@@ -412,6 +415,8 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
 
     def cache_request(self, request: FullRequest) -> None:
         if request.completed:
+            if request.id == 1:
+                print("hook here")
             self.tree_cache.cache_finished_req(request)
         else:
             self.tree_cache.cache_unfinished_req(request)

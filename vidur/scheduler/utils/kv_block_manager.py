@@ -66,7 +66,8 @@ class KVBlockManager:
         # 从空闲池中取出 Block ID
         block_id = self.free_blocks.popleft()
 
-
+        if block_id == 10:
+            print("hook here.")
         # 初始化引用计数
         self.ref_counts[block_id] = 1
         self.allocated_blocks.add(block_id)
