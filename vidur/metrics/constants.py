@@ -92,3 +92,8 @@ class RlTrainingMetrics(enum.Enum):
     RETURN = "return"
     POLICY_LOSS = "policy_loss"
     VALUE_LOSS = "value_loss"
+
+
+class WorkflowMetrics(enum.Enum):
+    WORKFLOW_E2E_TIME = "workflow_e2e_time"
+    WORKFLOW_E2E_PLUS_PREEMPTION_TIME = "workflow_e2e_plus_preemption_time"

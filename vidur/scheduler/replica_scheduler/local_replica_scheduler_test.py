@@ -101,7 +101,48 @@ def test_allocate_for_request_case2():
 
     print(" ")
 
+def test_for_prefill_cache():
+    scheduler = init_test_scheduler(block_size = 4)
 
+    req1 = FullRequest(
+        req_id= "req1",
+        arrived_at=0,
+        input_str="a b c d",
+        output_str="g h",
+    )
+    scheduler._allocate_request(req1)
+    fill_request_ids(req1)
+    scheduler.cache_request(req1)
+
+    scheduler.tree_cache.pretty_print()
+
+    # partial prefill
+    req2 = FullRequest(
+        req_id="req2",
+        arrived_at=0,
+        input_str="a b c d e f",
+        output_str="g h",
+    )
+
+    scheduler.add_request(req2)
+    batch = scheduler._get_next_batch()
+
+    print(batch.num_tokens)
+    assert batch.num_tokens[0] == 2
+
+    scheduler._replica_stage_schedulers[0].add_batch(batch)
+    #scheduler._replica_stage_schedulers[0].on_schedule()
+
+    batch.on_batch_end(0.5)
+    scheduler.on_batch_end(batch)
+    print(req2.num_processed_tokens)
+
+    batch = scheduler._get_next_batch()
+    scheduler._replica_stage_schedulers[0].add_batch(batch)
+    batch.on_batch_end(0.8)
+    print(req2.num_processed_tokens)
+
+    print(req2.completed)
 
 def test_node_split():
     scheduler = init_test_scheduler()
@@ -190,5 +231,27 @@ def test_partial_prefill():
     scheduler.cache_request(req1)
     scheduler.tree_cache.pretty_print()
 
+    print(req1.block_table)
+    print(req1.num_processed_tokens)
+
+
+def test_scheduler():
+    scheduler = init_test_scheduler()
+    req1 = FullRequest(
+        req_id="req1",
+        arrived_at=0,
+        input_str="1 2 3 4 5 6 7 8",
+        output_str="a b",
+    )
+
+    scheduler.add_request(req1)
+    batch = scheduler._get_next_batch()
+    batch.on_batch_end(0)
+    scheduler.on_batch_end(batch)
+
+    batch = scheduler._get_next_batch()
+    batch.on_batch_end(0.5)
+    scheduler.on_batch_end(batch)
+
 if __name__ == "__main__":
-    test_allocate_for_request_case2()
+    test_scheduler()

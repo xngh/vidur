@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Tuple, Dict
 
 import os
@@ -7,18 +8,23 @@ import matplotlib.pyplot as plt
 
 from vidur.config import SimulationConfig, RlConfig
 from vidur.entities import Request, Replica, Batch
+from vidur.entities.fake_request import FakeRequest
 from vidur.entities.full_request import FullRequest
 from vidur.scheduler.global_scheduler.base_global_scheduler import BaseGlobalScheduler
 
 from vidur.scheduler.replica_scheduler.local_replica_scheduler import LocalReplicaScheduler
 from vidur.scheduler.rl.algorithms.DQN import DQN
+from vidur.scheduler.rl.algorithms.DoubleDQN import DoubleDQN
+from vidur.scheduler.rl.algorithms.PPO import PPO
 from vidur.scheduler.utils.content_manager import ContentManager
 from vidur.scheduler.rl.buffer import ReplayBuffer
 from math import ceil
 from collections import defaultdict
 from vidur.logger import init_logger
+import pandas as pd
 
 logger = init_logger(__name__)
+CURRENT_TIME= datetime.now().strftime("%Y%m%d_%H%M%S")
 
 def convert_to_np(state: Dict):
     """
@@ -75,6 +81,14 @@ def convert_to_np(state: Dict):
     return np.array(final_flat_list, dtype=np.float32).reshape(1, -1)
 
 
+def create_req(request: FullRequest) -> FakeRequest:
+    return FakeRequest(
+        request.arrived_at,
+        request.num_prefill_tokens,
+        request.num_decode_tokens,
+        request.num_processed_tokens,
+    )
+
 def plot_rl_metric(x_label: str, y_label: str, data: List, metric_type: str, output_dir: str):
     """
     使用 matplotlib 绘制强化学习训练指标
@@ -82,32 +96,77 @@ def plot_rl_metric(x_label: str, y_label: str, data: List, metric_type: str, out
     window_size: 平滑窗口大小，设为1则不平滑
     """
 
-    # 2. 数据准备
+    output_dir = os.path.join(output_dir, CURRENT_TIME)
+
     iterations = np.arange(len(data))
     data = np.array(data)
 
-    # 3. 开始绘图
     plt.figure(figsize=(10, 5))
 
-    # 画原始数据（浅色细线）
     plt.plot(iterations, data, alpha=0.3, color='blue', label='Raw')
 
     # 画平滑数据（深色粗线）
     # plt.plot(smooth_iterations, smooth_data, color='blue', linewidth=2, label=f'Smoothed (win={window_size})')
 
-    # 4. 美化图表
     plt.title(f'Training {metric_type.replace("_", " ").title()}', fontsize=14)
     plt.xlabel(x_label, fontsize=12)
     plt.ylabel(y_label, fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.legend()
 
-    # 5. 保存
     os.makedirs(output_dir, exist_ok=True)
     save_path = os.path.join(output_dir, f"{metric_type}_plot.png")
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()  # 释放内存
     print(f"图表已保存至: {save_path}")
+
+def plot_rl_metricv2(x_label: str, y_label: str, data: List, metric_type: str, output_dir: str):
+    """
+    优化后的 RL 指标绘图函数
+    1. 增加移动平均平滑线
+    2. 降低原始数据透明度，减少视觉干扰
+    3. 自动调整 y 轴范围
+    """
+    if not data:
+        return
+
+    output_dir = os.path.join(output_dir, CURRENT_TIME)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 1. 数据准备
+    data_series = pd.Series(data)
+    # 根据数据量自动调整窗口大小（例如总量的 5%）
+    window_size = max(int(len(data) * 0.05), 5)
+    smoothed_data = data_series.rolling(window=window_size, min_periods=1).mean()
+    std_data = data_series.rolling(window=window_size, min_periods=1).std()
+
+    iterations = np.arange(len(data))
+
+    plt.figure(figsize=(12, 6))
+
+    # 2. 绘制原始数据（极低透明度，作为背景阴影）
+    plt.plot(iterations, data, alpha=0.15, color='#1f77b4', label='Raw Episode Return')
+
+    # 3. 绘制平滑后的趋势线（深色，加粗）
+    plt.plot(iterations, smoothed_data, color='#1f77b4', linewidth=2, label=f'Moving Average (win={window_size})')
+
+    # 4. (可选) 绘制标准差阴影区域，展示波动的稳定性
+    # plt.fill_between(iterations, smoothed_data - std_data, smoothed_data + std_data, color='#1f77b4', alpha=0.1)
+
+    # 5. 美化图表
+    plt.title(f'RL Training {metric_type.replace("_", " ").title()}', fontsize=15, fontweight='bold')
+    plt.xlabel(x_label, fontsize=12)
+    plt.ylabel(y_label, fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend(loc='upper left')
+
+    # 如果是 Return，固定 y 轴在 0-1 之间（因为你做了归一化）
+    if metric_type.lower() == 'return':
+        plt.ylim(-0.05, 1.05)
+
+    save_path = os.path.join(output_dir, f"{metric_type.lower()}_plot.png")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
 
 class RLGlobalScheduler(BaseGlobalScheduler):
     def __init__(self, config: SimulationConfig, replicas: Dict[int, Replica]):
@@ -115,8 +174,8 @@ class RLGlobalScheduler(BaseGlobalScheduler):
 
         self.content_manager: ContentManager
 
-        self.agent = self.init_agent(config.rl_config, len(replicas))
         self.buffer = ReplayBuffer(config.rl_config.buffer_size)
+        self.agent = self.init_agent(config.rl_config, len(replicas), self.buffer)
         self.state = None
 
         self.batch_size = config.rl_config.batch_size
@@ -124,30 +183,53 @@ class RLGlobalScheduler(BaseGlobalScheduler):
 
         # plot training progress
         self.update_count = 0
+        self.episode_count = 0
         self.returns = []
         self.policy_loss = []
         self.value_loss = []
 
         # global state
+        self.virtual_pending_queue = [[] for i in range(self._num_replicas)] # 用于记录当前调度的任务的pending情况
         self.bin_width = config.cluster_config.replica_scheduler_config.bin_width
         self.max_tokens_per_request = config.cluster_config.replica_scheduler_config.max_tokens_per_request
         self.chunk_size = config.cluster_config.replica_scheduler_config.chunk_size
 
-    def init_agent(self, config: RlConfig, num_replicas: int):
+        if config.rl_config.load_model_path is not None:
+            self.agent.load_model(config.rl_config.load_model_path)
+
+    def init_agent(self, config: RlConfig, num_replicas: int, buffer: ReplayBuffer):
         if config.algorithm == 'dqn':
-            return DQN(168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
-                       gamma=config.gamma, learning_rate=config.learning_rate, target_update=config.target_update_freq)
+            return DQN(buffer, 168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
+                       gamma=config.gamma, learning_rate=config.learning_rate, target_update=config.target_update_freq, batch_size=config.batch_size,
+                       minimal_size=config.minimal_size, epsilon=config.epsilon)
+        elif config.algorithm == 'ppo':
+            return PPO(buffer, 168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
+                       actor_lr=config.actor_lr, critic_lr=config.critic_lr, gamma=config.gamma, lmbda=config.lmbda,
+                       batch_size=config.batch_size, epochs=config.epochs, eps=config.eps, ent_coef=config.ent_coef)
+        elif config.algorithm == 'double_dqn':
+            return DoubleDQN(buffer, 168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
+                       gamma=config.gamma, learning_rate=config.learning_rate, target_update=config.target_update_freq, batch_size=config.batch_size,
+                       minimal_size=config.minimal_size, epsilon=config.epsilon)
         else:
             return None
 
 
 
     def reset(self):
-        pass
+        self.state = None
+
+        self.update_count = 0
+        self.episode_count = 0
+        self.returns = []
+        self.policy_loss = []
+        self.value_loss = []
+
+        self.virtual_pending_queue = [[] for i in range(self._num_replicas)]
 
     # 这里要考虑action 与 replica_id 的关系  允不允许不调度这个request，把它放后面调度？暂时认为都调度
     def schedule(self) -> List[Tuple[int, Request]]:
         self.sort_requests()
+        self.virtual_pending_queue = [[] for i in range(self._num_replicas)]  # reset
 
         request_mapping = []
         episode_return = 0
@@ -161,35 +243,35 @@ class RLGlobalScheduler(BaseGlobalScheduler):
             next_state, reward, done = self.step(action, request)
             request_mapping.append((action, request))
 
-            logger.debug(f"Schedule request {request.id} to replica {action}, reward: {reward}. request: {request.input_str}; tokens_id:{request.input_token_ids}")
+            logger.debug(f"Schedule request {request.id} to replica {action}, reward: {reward}.")
             np_next_state = convert_to_np(next_state)
             self.buffer.add(np_state, action, reward, np_next_state, done, None, None)
 
             episode_return += reward
             num_request += 1
-            if self.buffer.size() > self.minimal_size:
-                b_s, b_a, b_r, b_ns, b_d, _, _ = self.buffer.sample(self.batch_size)
-                transition_dict = {
-                    'states': b_s,
-                    'actions': b_a,
-                    'next_states': b_ns,
-                    'rewards': b_r,
-                    'dones': b_d
-                }
-                if isinstance(self.agent, DQN):
-                    loss = self.agent.update(transition_dict)
-                    self.policy_loss.append(loss)
-                    self.update_count += 1
-                else:
-                    actor_loss, critic_loss = self.agent.update(transition_dict)
-                    self.policy_loss.append(actor_loss)
-                    self.value_loss.append(critic_loss)
+            loss = self.agent.train()
 
+            if isinstance(self.agent, DQN) and loss is not None:
+                self.policy_loss.append(loss)
+                self.update_count += 1
+            elif isinstance(self.agent, DoubleDQN) and loss is not None:
+                self.policy_loss.append(loss)
+                self.update_count += 1
+            elif isinstance(self.agent, PPO) and loss[0] is not None:
+                self.policy_loss.append(loss[0])
+                self.value_loss.append(loss[1])
+                self.update_count += 1
+
+        self.episode_count += 1
         self.returns.append(episode_return / (num_request + 1e-10) )
         if len(self.returns) % 1000 == 0:
-            plot_rl_metric('episodes', 'return', self.returns, 'Return', 'data/result')
-        if (self.update_count + 1) % 10000 == 0:
-            plot_rl_metric('update_times', 'policy_loss', self.policy_loss, 'policy_loss', 'data/result')
+            plot_rl_metricv2('episodes', 'return', self.returns, 'Return', 'data/result')
+        # TODO 100 改成一个参数
+        if (self.update_count + 1) % 10 == 0:
+            plot_rl_metricv2('update_times', 'policy_loss', self.policy_loss, 'policy_loss', 'data/result')
+            plot_rl_metricv2('update_times', 'value_loss', self.value_loss, 'value_loss', 'data/result')
+        if self.episode_count % self._config.rl_config.save_model_steps == 0:
+            self.agent.save_model('data/result/' + CURRENT_TIME + '/model')
         return request_mapping
 
     def get_global_scheduler_state(self):
@@ -239,14 +321,30 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         state["local_state"] = local_state
         return state
 
+    def get_reward(self, action, request):
+        rewards = []
+
+        for i in range(self._num_replicas):
+            rewards.append(self.cal_reward(i, request))
+
+        return (rewards[action] - min(rewards)) / (max(rewards) - min(rewards) + 1e-8) # * request.relative_position
+
     def cal_reward(self, action, request: FullRequest):
         # 奖励怎么考虑呢？
         # 我觉得最重要的一点就是要刻画 被选择的这个local_engine相比于其他engine的收益
         # -- a. request到这个engine他的kv复用的长度相比其他engine的kv复用长度 [归一化后 - 平均值]
         replica_scheduler = self._replica_schedulers[action]
         assert isinstance(replica_scheduler, LocalReplicaScheduler), "scheduler type error."
-        reuse_kv_len, _ = replica_scheduler.tree_cache.match_prefix(request.input_token_ids)
-        reward_of_kv = reuse_kv_len / request.num_prefill_tokens
+        reuse_kv, _ = replica_scheduler.tree_cache.match_prefix(request.input_token_ids)
+        reward_of_kv = len(reuse_kv) / request.num_prefill_tokens
+
+        # evict block's penalty
+        num_required_blocks = (request.num_prefill_tokens - len(
+            reuse_kv)) // self._config.cluster_config.replica_scheduler_config.block_size
+        num_blocks_left = replica_scheduler.block_manager.num_total_blocks - replica_scheduler.block_manager.num_used_blocks \
+                          - num_required_blocks
+        num_blocks_evict = max(0, replica_scheduler._watermark_blocks - num_blocks_left)
+        reward_of_evict = num_blocks_evict
 
         # 用执行的速度来代替request的请求，越大越好
         # --a。 如果当前batch还未满，能够容纳request的全部prefill token，则用batch的处理时间来作为reward  TPOT
@@ -256,21 +354,27 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         replica_scheduler = self._replica_schedulers[action]
 
         # 计算current batch，要么已经组成batch，要么在preempted_queue中
-        replica_stage_scheduler = replica_scheduler.get_replica_stage_scheduler(0) # assume no parallelism
+        replica_stage_scheduler = replica_scheduler.get_replica_stage_scheduler(0)  # assume no parallelism
         current_batch = replica_stage_scheduler.get_current_batch()
         num_tokens = current_batch.num_tokens if current_batch is not None else []
         requests = current_batch.requests if current_batch is not None else []
 
         if hasattr(replica_scheduler, "_preempted_requests") and len(requests) == 0:
             requests = replica_scheduler._preempted_requests
-            num_tokens = [req.num_prefill_tokens - req.num_generated_tokens for req in requests if req.is_prefill_completed is False]
+            num_tokens = [req.num_prefill_tokens - req.num_generated_tokens for req in requests if
+                          req.is_prefill_completed is False]
 
-        prefill_token = min(request.num_prefill_tokens - reuse_kv_len[action], self.chunk_size - sum(num_tokens))
+        prefill_token = min(request.num_prefill_tokens - len(reuse_kv), self.chunk_size - sum(num_tokens))
         assert 0 <= prefill_token <= request.num_prefill_tokens
 
+        # 如果要排队，当前request在local_replica_scheduler里已经加入virtual_pending_queue了
+        pending_queue = self.get_replica_scheduler(action).get_pending_requests() + self.virtual_pending_queue[action][:-1]
+
         reward_of_time = 0.0
-        if prefill_token > 0:   # request可以立刻执行
-            fake_reqs = [copy.deepcopy(req) for req in requests] + [copy.deepcopy(request)]
+        if prefill_token > 0 and len(pending_queue) == 0:  # request可以立刻执行
+            fake_reqs = [create_req(req) for req in requests] + [create_req(request)]
+            for fake_req, req in zip(fake_reqs, requests):
+                fake_req._is_prefill_complete = req.is_prefill_complete
             fake_num_tokens = num_tokens + [prefill_token]
             fake_batch = Batch(action, fake_reqs, fake_num_tokens)
             predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
@@ -279,13 +383,28 @@ class RLGlobalScheduler(BaseGlobalScheduler):
             )
             reward_of_time -= predict_time.total_time
         else:
+            num_pending_tokens = sum([req.num_prefill_tokens for req in pending_queue])
+            num_predict_batches = ceil(num_pending_tokens / self._config.cluster_config.replica_scheduler_config.chunk_size)
+
+            current_batch = Batch(action, requests, num_tokens)
+            predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
+                current_batch,
+                replica_stage_scheduler.stage_id,
+            )
+            reward_of_time -= predict_time.total_time * num_predict_batches
+        return 5 * reward_of_time
+        if true:
+            pass
+        else:
             # 排队时间
             # 简单用 waiting queue的所有的request的prefill token，去算需要多少个chunk，轮到当前request
-            fake_reqs = [copy.deepcopy(req) for req in requests]
+            fake_reqs = [create_req(req) for req in requests] + [create_req(request)]
+            for fake_req, req in zip(fake_reqs, requests):
+                fake_req._is_prefill_complete = req.is_prefill_complete
             fake_num_tokens = num_tokens
 
             waiting_time = 0.0
-            pending_requests = [copy.deepcopy(req) for req in replica_scheduler._request_queue]
+            pending_requests = [create_req(req) for req in replica_scheduler._request_queue]
 
             while len(pending_requests) > 0:
 
@@ -297,36 +416,32 @@ class RLGlobalScheduler(BaseGlobalScheduler):
                     fake_reqs.append(req)
                     fake_num_tokens.append(prefill_token)
 
-
                 fake_batch = Batch(action, fake_reqs, fake_num_tokens)
 
                 predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
-                        fake_batch,
-                        replica_stage_scheduler.stage_id,
-                    )
+                    fake_batch,
+                    replica_stage_scheduler.stage_id,
+                )
 
                 waiting_time += predict_time.total_time
 
                 for req, token_len in zip(fake_reqs, fake_num_tokens):
-                    req.num_prefill_tokens -= token_len
+                    if req.is_prefill_complete:
+                        continue
 
-                    if req.num_prefill_tokens == 0:
+                    req._num_prefill_tokens -= token_len
+
+                    if req.num_prefill_tokens <= 0:
                         fake_reqs.remove(req)
                         fake_num_tokens.remove(token_len)
 
             reward_of_time -= waiting_time
 
-        # evict block's penalty
-        reward_of_evict = 0.0
+        logger.debug(
+            f"reward_of_kv: {reward_of_kv}, reward_of_evict: {reward_of_evict}, reward_of_time: {reward_of_time}")
 
-        num_required_blocks = (request.num_prefill_tokens - reuse_kv_len) // self._config.cluster_config.replica_scheduler_config.block_size
-        num_blocks_left = replica_scheduler.block_manager.num_total_blocks - replica_scheduler.block_manager.num_used_blocks \
-                          - num_required_blocks
-        num_blocks_evict = max(0, replica_scheduler.watermark_blocks - num_blocks_left)
-        reward_of_evict = num_blocks_evict * 0.0001
+        return 0.1 * reward_of_kv + 10 * reward_of_time + 0.0001 * reward_of_evict
 
-        logger.debug(f"reward_of_kv: {reward_of_kv}, reward_of_evict: {reward_of_evict}, reward_of_time: {reward_of_time}")
-        return reward_of_kv + reward_of_time + reward_of_evict
 
     def step(self, action, request: FullRequest):
         target_scheduler = self.get_replica_scheduler(action)
@@ -338,7 +453,7 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         one_hot_id = [0 for i in range(num_replica)]
         one_hot_id[action] = 1
 
-        next_state["local_state"][action] = one_hot_id + target_scheduler.step(request)
+        next_state["local_state"][action] = one_hot_id + target_scheduler.step(request, self.virtual_pending_queue[action])
 
         next_request = self._request_queue[0] if len(self._request_queue) > 0 else None
         if next_request is not None:
@@ -348,7 +463,8 @@ class RLGlobalScheduler(BaseGlobalScheduler):
             next_state["request_state"] = [0 for _ in range(len(self.state["request_state"]))]
             done = True
 
-        reward = self.cal_reward(action, request)
+        # reward = self.cal_reward(action, request)
+        reward = self.get_reward(action, request)
 
         return next_state, reward, done
 

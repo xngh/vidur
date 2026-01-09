@@ -66,8 +66,9 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             request = self.generate_unified_request(self.time, row)
             requests.append(request)
 
-            if len(requests) == 500:
+            if len(requests) >= 8000:
                 break
+
         return requests
 
 

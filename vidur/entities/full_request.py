@@ -61,7 +61,9 @@ class FullRequest(Request):
 
         self.num_matched_tokens = 0               # 用于replica_scheduler get_next_token时使用
         self.max_tokens = max_tokens              # 用于归一化request state
-    
+        self.relative_position = 0 if self.parent_unified_request.total_steps == 1 \
+            else self.parent_unified_request.current_step_index / (self.parent_unified_request.total_steps - 1)
+
     # --- Reload Request Methods ---
 
     # 没有直接调用父类的原有逻辑，而是在其基础上修改
@@ -72,7 +74,7 @@ class FullRequest(Request):
         self._latest_iteration_completed_at = time
         self.sim_output_tokens(num_tokens_processed)   # make fill_ids matches num_tokens_processed
 
-        assert self._num_processed_tokens <= self.total_tokens
+        assert self._num_processed_tokens <= self.total_tokens, f"{self.id}: {self._num_processed_tokens} > {self.total_tokens}"
         # for prefill request matches more tokens than it can process in this chunk
         # eg。 Assume [a b c d] has been cached。 req = [a b c d e f g h] chunk = 2
         # num_tokens_processed may be 2, but req.num_tokens_processed should be 6
@@ -106,7 +108,9 @@ class FullRequest(Request):
             # assert len(self.generated_token_ids) == len(self.output_token_ids), f"{len(self.generated_token_ids)=} == {len(self.output_token_ids)=}"
             self._completed_at = time
             self._completed = True
-            self.parent_unified_request.current_step_index += 1
+            # self.parent_unified_request.current_step_index += 1
+            self.parent_unified_request.update_on_request_finish(self, time)
+
             logger.debug(f"Request {self._id} completed at {self._completed_at}")
         return
 
@@ -207,8 +211,6 @@ class FullRequest(Request):
         state.append(self.num_decode_tokens / self.max_tokens)
 
         # 当前request在 workflow中的位次
-        current_progress_of_workflow = 0 if self.parent_unified_request.total_steps == 1 \
-            else self.parent_unified_request.current_step_index / (self.parent_unified_request.total_steps - 1)
-        state.append(current_progress_of_workflow)
+        state.append(self.relative_position)
 
         return state

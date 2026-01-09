@@ -1,5 +1,6 @@
 from vidur.scheduler.global_scheduler.RL_global_scheduler import RLGlobalScheduler
 from vidur.scheduler.global_scheduler.lor_global_scheduler import LORGlobalScheduler
+from vidur.scheduler.global_scheduler.parrot_global_scheduler import ParrotGlobalScheduler
 from vidur.scheduler.global_scheduler.random_global_scheduler import (
     RandomGlobalScheduler,
 )
@@ -22,3 +23,4 @@ GlobalSchedulerRegistry.register(
 )
 GlobalSchedulerRegistry.register(GlobalSchedulerType.LOR, LORGlobalScheduler)
 GlobalSchedulerRegistry.register(GlobalSchedulerType.RL, RLGlobalScheduler)
+GlobalSchedulerRegistry.register(GlobalSchedulerType.PARROT, ParrotGlobalScheduler)

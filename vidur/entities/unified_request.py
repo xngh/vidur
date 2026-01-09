@@ -109,8 +109,6 @@ class UnifiedRequest:
 
                 assert next_request.num_decode_tokens > 0, f"Request {next_request.id}'s output str is empty."
 
-                if next_request.id == 1262:
-                    print("hook here")
 
                 new_requests.append(next_request)
                 self.request_counter += 1

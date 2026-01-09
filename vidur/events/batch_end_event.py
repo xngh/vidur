@@ -37,11 +37,15 @@ class BatchEndEvent(BaseEvent):
                 content = request.input_str + request.output_str
                 next_requests = request.parent_unified_request.get_next_requests(self.time, content)
 
+                if len(next_requests) == 0:
+                    metrics_store.on_workflow_end(request, self.time)   # 这里实现
+
                 for next_request in next_requests:
                     new_request_events.append(
                         RequestArrivalEvent(self.time, next_request)
                     )
                     logger.debug(f"Add a new request {next_request.req_id} to event queue:")
+
 
 
         memory_usage_percent = replica_scheduler.memory_usage_percent

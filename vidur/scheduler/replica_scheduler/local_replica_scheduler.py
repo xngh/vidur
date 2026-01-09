@@ -109,26 +109,46 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         # 设置给 request block table
         request.block_table = request.block_table + extend_block_table
 
+    # TODO(yinhan): 感觉可以把match_prefix的操作全部放到 处于prefill阶段的request才做，然后重新组织一下这边代码的逻辑
     def _can_allocate_request(self, request: FullRequest) -> bool:
-        reused_block_ids, last_node_match = self.tree_cache.match_prefix(
-            request.input_token_ids
-        )
-        if request.last_node is None:
-            request.last_node = last_node_match
-            request.prefix_indices = reused_block_ids
-
-        num_matched_blocks = len(set(reused_block_ids))
-        request.num_matched_tokens = len(reused_block_ids)
 
         if request.id not in self._allocation_map:
             # new request
-            num_matched_tokens = len(reused_block_ids)
+            # 不管是no cached，partial cached 还是 total cached，在prefill阶段只allocate一次
+            reused_block_ids, last_node_match = self.tree_cache.match_prefix(
+                request.input_token_ids
+            )
+
+            request.prefix_indices = reused_block_ids
+            request.num_matched_tokens = len(reused_block_ids)
+
+            request.set_block_table(reused_block_ids)
+            request._num_processed_tokens = len(reused_block_ids)
+            request.fill_ids = request.input_token_ids[: request.num_processed_tokens]
+            request.last_node = last_node_match
+
+            self.tree_cache.inc_lock_ref(last_node_match, request.id)
+            self.block_manager.increment_ref_for_blocks(reused_block_ids)
+
+
+            num_matched_tokens = request.num_matched_tokens
             assert request.num_prefill_tokens - num_matched_tokens >= 0
 
             num_required_blocks = ceil(
                 (request.num_prefill_tokens - num_matched_tokens) / self._config.block_size
             )
-            return self.can_allocate(request, num_required_blocks)
+            re = self.can_allocate(request, num_required_blocks)
+            if not re:
+                request.last_node = None
+                request.prefix_indices = []
+                request.num_matched_tokens = 0
+                request.fill_ids = []
+                request._num_processed_tokens = 0
+                request.block_table = []
+
+                self.tree_cache.dec_lock_ref(last_node_match, request.id)
+                self.block_manager.decrement_ref_for_blocks(reused_block_ids)
+            return re
         else:
             num_tokens_reserved = len(request.block_table)
             num_tokens_required = max(0, request.num_processed_tokens - num_tokens_reserved)
@@ -144,35 +164,15 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
 
 
     # 因为block manager的allocate_block中已经自动为新分配的block加了ref_count，所以这里不需要再加
-    # 还有一个问题就是，这里和chunk是怎么联系起来的，理论上，request需要的token是跟chunk有关的？
-    def _allocate_request(self, request: FullRequest) -> None:
-        # 尝试前缀匹配 
-        # 冗余 Blocks 列表, 匹配的 token 数量, 最后一个节点
-        reused_block_ids, last_node_match = self.tree_cache.match_prefix(
-            request.input_token_ids
-        )
-        if request.last_node is None:
-            request.last_node = last_node_match
-            request.prefix_indices = reused_block_ids
-
-        num_matched_blocks = len(set(reused_block_ids))
-        if len(request.block_table) == 0 and len(reused_block_ids) > 0:
-            request.set_block_table(reused_block_ids)
-            # 增加前缀树中被复用的block的引用计数
-            # 遍历冗余列表，但只对唯一的 Block ID 增加引用计数
-            self.block_manager.increment_ref_for_blocks(reused_block_ids)
-
-            # 还得增加 tree node 的引用计数
-            self.tree_cache.inc_lock_ref(last_node_match)
-        
-        # 计算新 Block 需求
-        # 这个判断是对的，因为这里的block id是冗余的
-        # 即 block_size = 4, 则 [a, b, c, d] -> [0, 0, 0, 0]
-        num_matched_tokens = len(reused_block_ids) 
-
+    # TODO(yinhan): 感觉可以把match_prefix的操作全部放到 处于prefill阶段的request才做，然后重新组织一下这边代码的逻辑
+    def _allocate_request(self, request: FullRequest):
         # for new request
         if request.id not in self._allocation_map:
             # new request
+            # 前缀匹配在can_allocate做过
+            num_matched_tokens = request.num_matched_tokens
+            num_matched_blocks = len(set(request.prefix_indices))
+
             num_required_blocks = ceil(
                 (request.num_prefill_tokens - num_matched_tokens) / self._config.block_size
             )
@@ -205,15 +205,18 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         #    return
 
         self.allocate(request, 1)
+        return
 
     def on_batch_end(self, batch: Batch) -> None:
         self._num_running_batches -= 1
 
         for request in batch.requests:
+            if request.is_prefill_complete and request.num_processed_decode_tokens == 1:
+                self._prepare_for_decode(request)
+                assert len(request.block_table) == request.num_processed_tokens == len(
+                    request.fill_ids), "error when process block table and num_processed_tokens."
+
             if not request.completed:
-                if request.is_prefill_complete and request.num_processed_decode_tokens == 1:
-                    self._prepare_for_decode(request)
-                    assert len(request.block_table) == request.num_processed_tokens == len(request.fill_ids), "error when process block table and num_processed_tokens."
                 self._preempted_requests.append(request)
 
             self.cache_request(request)
@@ -223,6 +226,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             # 这时候先free再cache，会导致output的block的ref - 1 = 0， 然后free。cache时又想给ref+1，但是
             # 找不到这个block了。 但是prepare_for_decode得在前面执行（因为计数原因），因此调换顺序
             if request.completed:
+                assert request.num_processed_tokens == len(request.block_table) == len(request.fill_ids), f"{request.num_processed_tokens=}, {len(request.block_table)=}, {len(request.fill_ids)=}"
                 self._free_request([request])
 
     # 这里有个 case，就是如果刚好给所有的 prefill token 分配完block，即prefill_completed == True
@@ -267,6 +271,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
     # next_num_tokens = num_prefill_tokens - num_processed_tokens - matched_tokens = 8 - 4 - 8 = -4 这里产生了错误
     # 错误的原因在于有的时候num_processed_token包含了match_tokens，有的时候没有
     # 这里修改的方式是用 max(request.num_processed_tokens, request.matched_tokens) 代替 request.num_processed_tokens
+    # 当request第一次进来时，此时process_token为0，但是通过can_allocate，可以获得num_match_tokens
     def _get_request_next_num_tokens(
         self, request: FullRequest, batch_contains_prefill: bool, num_batch_tokens: int
     ) -> int:
@@ -305,11 +310,13 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             if not request.is_prefill_complete:
                 running_prefills.append(request)
                 continue
+
             
             # 进入decode阶段的request  这里固定返回1
             next_num_tokens = self._get_request_next_num_tokens(
                 request, contains_prefill, num_batch_tokens
             )
+
 
             if next_num_tokens == 0:
                 skipped_requests.append(request)
@@ -318,7 +325,6 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             while not self._can_allocate_request(request):
                 # 无法分配时
                 # 把preempted requests的最后一个放回request队列的头部
-                # 但是preempted request是什么
                 if self._preempted_requests:
                     victim_request = self._preempted_requests.pop(-1)
                     self._free_request([victim_request])  # 这里扣减了node.ref_count  也删除了 block id
@@ -362,6 +368,8 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         skipped_requests = []
 
         while self._request_queue:
+            if self._request_queue[0].id == 2334:
+                print("hook here.")
             if len(self._allocation_map) == self._config.batch_size_cap:
                 break
 
@@ -375,7 +383,11 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
                 self._request_queue[0], contains_prefill, num_batch_tokens
             )
 
-            if next_num_tokens == 0:
+            # vidur里这里的逻辑应该是算出来chunk已经满了，就不再加入新的request
+            # 但是这里遇到一个情况是，prompt完全cache，prefill阶段的token可以被
+            # 完全复用，算出来的next_num_tokens也为0. 导致误判chunk已满，使得后续这
+            # 里的request都无法被执行（因为一遇到这个request就break）
+            if num_batch_tokens == self._config.chunk_size:
                 break
 
             request = self._request_queue.pop(0)
@@ -415,8 +427,6 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
 
     def cache_request(self, request: FullRequest) -> None:
         if request.completed:
-            if request.id == 1:
-                print("hook here")
             self.tree_cache.cache_finished_req(request)
         else:
             self.tree_cache.cache_unfinished_req(request)
@@ -434,27 +444,33 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         '''
         replica_state = []
         matched_tokens, _ = self.tree_cache.match_prefix(request.input_token_ids)
-        assert len(matched_tokens) <= len(request.input_token_ids)
         num_matched_tokens = len(matched_tokens)
+        assert num_matched_tokens <= request.num_prefill_tokens
 
-        save_ratio = num_matched_tokens / len(request.input_token_ids)
+        save_ratio = num_matched_tokens / request.num_prefill_tokens
 
-        batch_queue = self.get_replica_stage_scheduler(0).get_batch_queue()
-        running_req_distribution = self.get_running_state(batch_queue)
+        current_batch = self.get_replica_stage_scheduler(0).get_current_batch()
+        if current_batch is None:
+            running_queue = self._preempted_requests
+        else:
+            running_queue = current_batch.requests
 
-        pending_req_distribution = self.get_waiting_state(self._request_queue)
-        assert len(running_req_distribution) == len(pending_req_distribution), f"running_req_len:{len(running_req_distribution)} and pending_req_len:{len(pending_req_distribution)}"
+        running_req_state = self.get_running_state(running_queue)
+
+        pending_req_state = self.get_waiting_state(self._request_queue)
+        assert len(running_req_state) == len(pending_req_state), f"running_req_len:{len(running_req_state)} and pending_req_len:{len(pending_req_state)}"
 
         replica_state.append(save_ratio)
-        replica_state.extend(running_req_distribution + pending_req_distribution)
+        replica_state.extend(running_req_state + pending_req_state)
         return replica_state
 
-    def get_running_state(self, batch_queue):
+    def get_running_state(self, running_queue):
         '''
             running state目前考虑的就是 正在运行的request的剩余工作量的分布：
             -- prefill的任务就是 num_prefill_tokens - num_process_tokens
             -- decode的任务就是 num_decode_tokens - num_process_decode_tokens
 
+        :param running_queue: List[FullRequest]
         :param bin_width: 直方图的间隔大小，默认为 100
         :return: token_distribution: 一个列表，包含 (bin_start, count) 元组，
                                     例如 [(0, 5), (100, 3)] 表示有 5 个请求剩余 token 在 [0, 100) 范围内，
@@ -467,14 +483,12 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             raise ValueError("bin_width must be positive integer.")
 
         # get running requests
-        assert len(batch_queue) == 0 or len(batch_queue) == 1  # assume only one stage scheduler
 
-        if len(batch_queue) == 0:
-            # 没有正在运行的batch
+        if len(running_queue) == 0:
+            # 没有正在运行的request
             return self.cal_token_distribution([])
 
-
-        for request in batch_queue:
+        for request in running_queue:
             # TODO: 这里目前用真实的decode token数量来表示，后续改成预测的decode数量
             remaining_tokens = request.num_prefill_tokens + request.num_decode_tokens - request.num_processed_tokens
 
@@ -494,28 +508,58 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
 
         return self.cal_token_distribution(pending_state)
 
-    def step(self, request: FullRequest):
+    def step(self, request: FullRequest, extra_pending_requests: List[FullRequest]):
         next_state = []
 
         matched_tokens, _ = self.tree_cache.match_prefix(request.input_token_ids)
         assert len(matched_tokens) <= len(request.input_token_ids)
         num_matched_tokens = len(matched_tokens)
 
+        num_require_tokens = request.num_prefill_tokens - num_matched_tokens
+        num_require_blocks = ceil(
+            num_require_tokens / self._config.block_size
+        )
+        current_batch = self.get_replica_stage_scheduler(0).get_current_batch()
+
+        num_batch_tokens = 0
+        if current_batch is None:
+            for r in self._preempted_requests:
+                if r.prefill_completed:
+                    num_batch_tokens += 1
+                else:
+                    num_batch_tokens += r.num_prefill_tokens - r.num_processed_tokens
+        else:
+            num_batch_tokens = sum(current_batch.num_tokens)
+
+        num_batch_tokens = min(self._config.chunk_size, num_batch_tokens)
+
         save_ratio = num_matched_tokens / len(request.input_token_ids)
 
-        batch_queue = self.get_replica_stage_scheduler(0).get_batch_queue()
-        if len(self._request_queue) > 0:
-            pending_queue = self._request_queue + [request]
-            next_waiting_state = self.get_waiting_state(pending_queue)
+        # 如果request没法立即执行，走case1
+        if num_require_blocks < self.block_manager.num_free_blocks or \
+            num_require_tokens < self._config.chunk_size - num_batch_tokens or \
+            len(self._request_queue) > 0:
+            extra_pending_requests.append(request)
 
-            next_running_state = self.get_running_state(batch_queue)
+        pending_queue = self._request_queue + extra_pending_requests
+
+        if current_batch is None:
+            running_queue = self._preempted_requests
         else:
-            next_waiting_state = self.get_waiting_state(self._request_queue)
-            running_queue = batch_queue + [request]
+            running_queue = current_batch.requests
+
+        # case1
+        if len(pending_queue) > 0:
+            next_waiting_state = self.get_waiting_state(pending_queue)
+            next_running_state = self.get_running_state(running_queue)
+        # case2
+        else:
+            next_waiting_state = self.get_waiting_state(pending_queue)
+            running_queue = running_queue + [request]
             next_running_state = self.get_running_state(running_queue)
 
         next_state.append(save_ratio)
-        next_state.extend(next_waiting_state + next_running_state)
+        next_state.extend(next_running_state + next_waiting_state)
         return next_state
 
     def cal_token_distribution(self, num_tokens: List[int]) -> List[int]:

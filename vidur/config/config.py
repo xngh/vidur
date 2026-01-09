@@ -535,6 +535,11 @@ class RLGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
     def get_type():
         return GlobalSchedulerType.RL
 
+@dataclass
+class ParrotGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
+    @staticmethod
+    def get_type():
+        return GlobalSchedulerType.PARROT
 
 @dataclass
 class BaseExecutionTimePredictorConfig(BasePolyConfig):
@@ -678,6 +683,14 @@ class RlConfig:
         default=0.01,
         metadata={"help": "Learning rate."},
     )
+    actor_lr: float = field(
+        default=0.01,
+        metadata={"help": "Actor learning rate for AC framework."},
+    )
+    critic_lr: float = field(
+        default=0.01,
+        metadata={"help": "Critic learning rate for AC framework."},
+    )
     gamma: float = field(
         default=0.98,
         metadata={"help": "Gamma for algorithm."},
@@ -690,9 +703,29 @@ class RlConfig:
         default=256,
         metadata={"help": "Hidden dimension."},
     )
+    epsilon: float = field(
+        default=0.01,
+        metadata={"help": "Epsilon for epsilon-greedy algorithm."},
+    )
+    ent_coef: float = field(
+        default=0.01,
+        metadata={"help": "Entropy coefficient."},
+    )
     target_update_freq: int = field(
         default=10,
         metadata={"help": "Target update frequency."},
+    )
+    epochs: int = field(
+        default=10,
+        metadata={"help": "Number of update epochs in PPO algorithm."},
+    )
+    lmbda: float = field(
+        default=0.95,
+        metadata={"help": "LMBDA for PPO algorithm."},
+    )
+    eps: float = field(
+        default=0.2,
+        metadata={"help": "clip eps for PPO-clip algorithm."},
     )
     batch_size: int = field(
         default=256,
@@ -701,6 +734,14 @@ class RlConfig:
     minimal_size: int = field(
         default=500,
         metadata={"help": "Minimal size of samples."},
+    )
+    save_model_steps: int = field(
+        default=10000,
+        metadata={"help": "Save model steps."},
+    )
+    load_model_path: str = field(
+        default=None,
+        metadata={"help": "Load model path."},
     )
 
 

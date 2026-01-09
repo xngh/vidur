@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 logger = init_logger(__name__)
 
-class DQN:
+class DoubleDQN:
     def __init__(self,
                  buffer,
                  feature_dim,
@@ -69,7 +69,11 @@ class DQN:
         #logger.debug(f"actions size: {actions.size()}")
         #logger.debug(f"network output size: {self.q_net(states).size()}")
         q_values = self.q_net(states).gather(1, actions)
-        max_next_q_values = self.target_q_net(next_states).max(1)[0].view(-1, 1)
+
+        # 1. 用当前的 q_net 选出下一个状态下最好的动作下标
+        best_actions = self.q_net(next_states).argmax(dim=1).view(-1, 1)
+        # 2. 用 target_q_net 评估这个动作的 Q 值
+        max_next_q_values = self.target_q_net(next_states).gather(1, best_actions)
 
         q_targets = rewards + self.gamma * max_next_q_values * (1 - dones)
         # loss = torch.mean(F.mse_loss(q_values, q_targets))
@@ -82,7 +86,6 @@ class DQN:
 
         if self.count % self.target_update == 0:
             self.target_q_net.load_state_dict(self.q_net.state_dict())
-        #self.soft_update()
         self.count += 1
 
         if self.epsilon > self.epsilon_end:

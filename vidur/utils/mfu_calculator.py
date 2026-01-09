@@ -42,5 +42,5 @@ class MFUCalculator:
         mlp_flops = self._get_mlp_flops(batch_stage)
         attention_flops = self._get_attention_flops(batch_stage)
         total_flops = mlp_flops + attention_flops
-        total_flops_per_second = total_flops / batch_stage.execution_time
+        total_flops_per_second = total_flops / batch_stage.execution_time if batch_stage.execution_time > 0 else 0
         return total_flops_per_second * 100 / self._device_flops

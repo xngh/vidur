@@ -69,6 +69,9 @@ class BaseReplicaScheduler(ABC):
     def num_pending_requests(self) -> int:
         return len(self._request_queue)
 
+    def get_pending_requests(self) -> List[Request]:
+        return self._request_queue
+
     @property
     def replica_id(self) -> int:
         return self._replica_id
