@@ -276,6 +276,28 @@ class ShareGPTRequestGeneratorConfig(BaseRequestGeneratorConfig):
     def get_type():
         return RequestGeneratorType.UNIFIED
 
+@dataclass
+class MapReduceRequestGeneratorConfig(BaseRequestGeneratorConfig):
+    trace_file: str = field(
+        default="data/map_reduce/MapReduceTrace.json",
+        metadata={"help": "Path to the map-reduce trace request generator file."},
+    )
+    start_time: float = field(
+        default=0.0,
+        metadata={"help": "Start time for the map-reduce request generator."},
+    )
+    interval_generator_config: PoissonRequestIntervalGeneratorConfig = field(
+        default_factory=PoissonRequestIntervalGeneratorConfig,
+        metadata={"help": "Config for the PoissonRequestIntervalGenerator."},
+    )
+    max_tokens: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the trace request generator."},
+    )
+
+    @staticmethod
+    def get_type():
+        return RequestGeneratorType.MAPREDUCE
 
 @dataclass
 class BaseReplicaSchedulerConfig(BasePolyConfig):

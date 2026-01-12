@@ -33,12 +33,15 @@ class UnifiedRequest:
         self.step_names: List[str] = []  # different step names in workflow, distinguish from stage in vidur
         self.current_step_index: int = 0
         # active requests (submitted but not yet finished)
-        self.active_requests: List[FullRequest] = [] 
+        self.active_requests: List[FullRequest] = []
         self.workflow_status = UnifiedRequestStatus.PENDING  
 
         self._initialize_step_names()
         self.total_steps = len(self.step_names)
         self.max_token_for_request = max_token_for_request   # for search data from profile data
+
+        self.context_information = ""
+
 
     def _initialize_step_names(self):
         """
@@ -61,18 +64,17 @@ class UnifiedRequest:
             self.workflow_status = UnifiedRequestStatus.RUNNING 
 
     # 这个函数应该会在上一个full_request结束的event中调用或者初始时，用于发射下一个request
-    # TODO(yinhan): 需要把上一个FullRequest的输入和输出作为history传入 已完成
-    # TODO(yinhan): 对于map-reduce类型的agent，content应该是多个request的结果的和
-    #             同时只有在同一个step的最后一个任务完成时才会产生后续step的任务，意味着
-    #             这个函数返回可能是[], 要确保相应逻辑能够处理空的状态
+    # TODO(yinhan): 这里对于full request是否可以并行的逻辑实现得比较粗糙，后续可以考虑实现图结构
     def get_next_requests(self, current_time: float, content: str = "") -> List[FullRequest]:
         """
         Retrieve all FullRequests that need to be initiated in the current step.
         This is the core logic of the workflow: it only triggers after the previous step is completed (when active_requests is empty).
         """
         # 如果工作流已完成，或当前阶段仍在运行，则不产生新请求
-        if self.is_finished():
+        if self.is_finished() or len(self.active_requests) > 0:
             return []
+
+        assert len(self.active_requests) == 0, "former level requests have not finished"
         
         # 检查是否所有阶段都已完成
         if self.current_step_index >= self.total_steps:
@@ -109,12 +111,14 @@ class UnifiedRequest:
 
                 assert next_request.num_decode_tokens > 0, f"Request {next_request.id}'s output str is empty."
 
-                if next_request.id == 1262:
-                    print("hook here")
 
                 new_requests.append(next_request)
                 self.request_counter += 1
-        
+
+        if len(new_requests) > 1:
+            for req in new_requests:
+                req.is_parallelizable = True
+
         self.active_requests.extend(new_requests)
         return new_requests
 
@@ -127,6 +131,10 @@ class UnifiedRequest:
             return 
 
         self.active_requests.remove(finished_request)
+        self.context_information += finished_request.input_str
+        self.context_information += " "
+        self.context_information += finished_request.output_str
+        self.context_information += " "
 
         if not self.active_requests:
             self.current_step_index += 1
@@ -140,3 +148,9 @@ class UnifiedRequest:
             if self.is_finished():
                 self.workflow_status = UnifiedRequestStatus.COMPLETED
                 self.completion_time = current_time
+
+    def is_current_step_finished(self):
+        if len(self.active_requests) == 0:
+            return True
+        else:
+            return False

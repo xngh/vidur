@@ -10,6 +10,7 @@ from vidur.logger import init_logger
 from vidur.metrics import MetricsStore
 from vidur.request_generator import RequestGeneratorRegistry
 from vidur.scheduler import BaseGlobalScheduler, GlobalSchedulerRegistry
+from vidur.scheduler.global_scheduler.RL_global_scheduler import RLGlobalScheduler
 
 logger = init_logger(__name__)
 
@@ -59,6 +60,34 @@ class AgentSimulator:
     def metric_store(self) -> MetricsStore:
         return self._metric_store
 
+    def reset(self):
+        self._time = 0
+        self._terminate = False
+        self._time_limit = self._config.time_limit
+        if not self._time_limit:
+            self._time_limit = float("inf")
+
+        self._event_queue = []
+
+        self._event_trace = []
+        self._event_chrome_trace = []
+
+        self._cluster = Cluster(
+            self._config.cluster_config,
+            self._config.metrics_config,
+            self._config.request_generator_config,
+        )
+        self._metric_store = MetricsStore(self._config)
+        self._request_generator = RequestGeneratorRegistry.get(
+            self._config.request_generator_config.get_type(),
+            self._config.request_generator_config,
+        )
+
+        self._app_queue = []  # 用于存放unified_request的队列
+
+        self._init_app_queue()
+        self._init_event_queue()
+
     def run(self) -> None:
         logger.info(
             f"Starting simulation with cluster: {self._cluster} and {len(self._event_queue)} requests"
@@ -103,12 +132,16 @@ class AgentSimulator:
         for event in events:
             self._add_event(event)
 
-    # TODO: 
     def _init_event_queue(self) -> None:
-        for app in self._app_queue:
-            requests = app.get_next_requests(app.arrived_at)  # 对于并行的情况，返回多个full_request
+        for arrived_at, app in self._app_queue:
+            requests = app.get_next_requests(arrived_at)  # 对于并行的情况，返回多个full_request
             for request in requests:
-                self._add_event(RequestArrivalEvent(request.arrive_at, request))
+                if request.num_decode_tokens == 0 or request.num_prefill_tokens == 0:
+                    continue
+
+                assert request.num_prefill_tokens > 0, f"Request {request.id}'s input {request.input_str}"
+                assert request.num_decode_tokens > 0, f"Request {request.id}'s output is empty."
+                self._add_event(RequestArrivalEvent(arrived_at, request))
     
     def _init_app_queue(self) -> None:
         unified_requests = self._request_generator.generate()
