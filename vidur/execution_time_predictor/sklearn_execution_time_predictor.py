@@ -891,15 +891,37 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
         if agg_kv_cache_size == 0 or agg_prefill_chunk_size == 0:
             return 0
 
-        assert (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2) in self._predictions["attn_prefill"], f"no data with key: {(agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)}"
 
-        return self._predictions["attn_prefill"][
-            (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
-        ] * (
-            1
-            + self._attention_prefill_batching_overhead_fraction
-            * int(len(prefill_params) > 1)
+        # assert (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2) in self._predictions["attn_prefill"], f"no data with key: {(agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)}"
+        query_key = (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
+        # 尝试直接获取
+        if query_key in self._predictions["attn_prefill"]:
+            prediction = self._predictions["attn_prefill"][query_key]
+        else:
+            # 如果没找到，搜索最近的 key
+            all_keys = list(self._predictions["attn_prefill"].keys())
+            if not all_keys:
+                return 0
+
+            # 将 keys 转换为 numpy 数组进行快速距离计算
+            keys_array = np.array(all_keys)
+            distances = np.linalg.norm(keys_array - np.array(query_key), axis=1)
+            nearest_key = all_keys[np.argmin(distances)]
+
+            prediction = self._predictions["attn_prefill"][nearest_key]
+
+        return prediction * (
+                1
+                + self._attention_prefill_batching_overhead_fraction
+                * int(len(prefill_params) > 1)
         )
+        # return self._predictions["attn_prefill"][
+        #    (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
+        # ] * (
+        #    1
+        #    + self._attention_prefill_batching_overhead_fraction
+        #    * int(len(prefill_params) > 1)
+        #)
 
     def _get_schedule_time(self, batch: Batch) -> float:
         if self._config.skip_cpu_overhead_modeling:

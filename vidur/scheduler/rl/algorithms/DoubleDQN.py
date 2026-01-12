@@ -3,7 +3,7 @@ import os
 import numpy as np
 
 from vidur.logger import init_logger
-from vidur.scheduler.rl.network import PolicyNet, Qnet
+from vidur.scheduler.rl.network import PolicyNet, Qnet, CrossAttentionQNet
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -22,18 +22,23 @@ class DoubleDQN:
                  target_update = 10,
                  batch_size = 64,
                  minimal_size = 500,
-                 device = "cuda"):
+                 device = "cuda",
+                 use_attn = False,
+                 req_feature_dim = None,
+                 engine_feature_dim = None):
         self.action_dim = action_dim
         self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-        self.q_net = Qnet(feature_dim, hidden_dim, action_dim).to(device)
-        self.target_q_net = Qnet(feature_dim, hidden_dim, action_dim).to(device)
+        self.q_net = Qnet(feature_dim, hidden_dim, action_dim).to(device) if use_attn == False else (
+            CrossAttentionQNet(req_feature_dim, engine_feature_dim, action_dim, hidden_dim)).to(self.device)
+        self.target_q_net = Qnet(feature_dim, hidden_dim, action_dim).to(device) if use_attn == False else (
+            CrossAttentionQNet(req_feature_dim, engine_feature_dim, action_dim, hidden_dim)).to(self.device)
 
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=learning_rate)
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_end = 0.01
-        self.epsilon_decay = 0.998
+        self.epsilon_decay = 0.9997
         self.tau = 0.01
         self.target_update = target_update
         self.count = 0

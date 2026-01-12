@@ -5,3 +5,4 @@ class RequestGeneratorType(BaseIntEnum):
     SYNTHETIC = 1
     TRACE_REPLAY = 2
     UNIFIED = 3
+    MAPREDUCE = 4

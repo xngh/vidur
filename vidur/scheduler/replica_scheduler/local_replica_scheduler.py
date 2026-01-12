@@ -448,6 +448,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         assert num_matched_tokens <= request.num_prefill_tokens
 
         save_ratio = num_matched_tokens / request.num_prefill_tokens
+        kv_used_ratio = self.block_manager.num_free_blocks / self.block_manager.num_total_blocks
 
         current_batch = self.get_replica_stage_scheduler(0).get_current_batch()
         if current_batch is None:
@@ -461,6 +462,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         assert len(running_req_state) == len(pending_req_state), f"running_req_len:{len(running_req_state)} and pending_req_len:{len(pending_req_state)}"
 
         replica_state.append(save_ratio)
+        replica_state.append(kv_used_ratio)
         replica_state.extend(running_req_state + pending_req_state)
         return replica_state
 
@@ -533,7 +535,8 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
 
         num_batch_tokens = min(self._config.chunk_size, num_batch_tokens)
 
-        save_ratio = num_matched_tokens / len(request.input_token_ids)
+        save_ratio = num_matched_tokens / request.num_prefill_tokens
+        kv_used_ratio = self.block_manager.num_free_blocks / self.block_manager.num_total_blocks
 
         # 如果request没法立即执行，走case1
         if num_require_blocks < self.block_manager.num_free_blocks or \
@@ -559,6 +562,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             next_running_state = self.get_running_state(running_queue)
 
         next_state.append(save_ratio)
+        next_state.append(kv_used_ratio)
         next_state.extend(next_running_state + next_waiting_state)
         return next_state
 

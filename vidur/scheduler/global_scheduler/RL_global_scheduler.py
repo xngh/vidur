@@ -55,21 +55,15 @@ def convert_to_np(state: Dict):
 
     # 2. 按照您代码中的结构顺序处理 state 的三个主要部分
 
-    # 2.1. request_state (字典中的字典/列表)
-    request_state = state.get("request_state", {})
-    if isinstance(request_state, dict):
-        # 遍历 request_state 字典中的所有值
-        for key in sorted(request_state.keys()):  # 排序保证特征顺序一致性
-            final_flat_list.extend(flatten(request_state[key]))
-    else:
-        # 如果 request_state 本身是列表或标量
-        final_flat_list.extend(flatten(request_state))
+    # 2.1. request_state
+    request_state = state.get("request_state", [])
+    final_flat_list.extend(flatten(request_state))
 
-    # 2.2. global_state (通常是列表或标量)
-    global_state = state.get("global_state")
+    # 2.2. global_state
+    global_state = state.get("global_state", [])
     final_flat_list.extend(flatten(global_state))
 
-    # 2.3. local_state (嵌套列表/特征矩阵)
+    # 2.3. local_state
     # 这是一个包含多个 replica 状态的列表，每个状态本身是一个列表
     local_state = state.get("local_state", [])
     final_flat_list.extend(flatten(local_state))
@@ -181,6 +175,9 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         self.batch_size = config.rl_config.batch_size
         self.minimal_size = config.rl_config.minimal_size
 
+        # mode
+        self.use_attn = config.rl_config.use_attn
+
         # plot training progress
         self.update_count = 0
         self.episode_count = 0
@@ -199,17 +196,19 @@ class RLGlobalScheduler(BaseGlobalScheduler):
 
     def init_agent(self, config: RlConfig, num_replicas: int, buffer: ReplayBuffer):
         if config.algorithm == 'dqn':
-            return DQN(buffer, 168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
+            return DQN(buffer, 172, hidden_dim=config.hidden_dim, action_dim=num_replicas,
                        gamma=config.gamma, learning_rate=config.learning_rate, target_update=config.target_update_freq, batch_size=config.batch_size,
-                       minimal_size=config.minimal_size, epsilon=config.epsilon)
+                       minimal_size=config.minimal_size, epsilon=config.epsilon, use_attn=config.use_attn, req_feature_dim=config.req_feature_dim,
+                       engine_feature_dim=config.engine_feature_dim)
         elif config.algorithm == 'ppo':
-            return PPO(buffer, 168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
+            return PPO(buffer, 172, hidden_dim=config.hidden_dim, action_dim=num_replicas,
                        actor_lr=config.actor_lr, critic_lr=config.critic_lr, gamma=config.gamma, lmbda=config.lmbda,
                        batch_size=config.batch_size, epochs=config.epochs, eps=config.eps, ent_coef=config.ent_coef)
         elif config.algorithm == 'double_dqn':
-            return DoubleDQN(buffer, 168, hidden_dim=config.hidden_dim, action_dim=num_replicas,
+            return DoubleDQN(buffer, 172, hidden_dim=config.hidden_dim, action_dim=num_replicas,
                        gamma=config.gamma, learning_rate=config.learning_rate, target_update=config.target_update_freq, batch_size=config.batch_size,
-                       minimal_size=config.minimal_size, epsilon=config.epsilon)
+                       minimal_size=config.minimal_size, epsilon=config.epsilon, use_attn=config.use_attn, req_feature_dim=config.req_feature_dim,
+                       engine_feature_dim=config.engine_feature_dim)
         else:
             return None
 
@@ -300,9 +299,10 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         request_state = request.get_state()
         state["request_state"] = request_state
 
-        # global-scheduler-level state
-        global_state = self.get_global_scheduler_state()
-        state["global_state"] = global_state
+        # global-scheduler-level state  attention network下暂时不用
+        if not self.use_attn:
+            global_state = self.get_global_scheduler_state()
+            state["global_state"] = global_state
 
         # local-scheduler-level state
         num_replica = len(self._replica_schedulers)
@@ -325,7 +325,7 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         rewards = []
 
         for i in range(self._num_replicas):
-            rewards.append(self.cal_reward(i, request))
+            rewards.append(self.cal_rewardv2(i, request))
 
         return (rewards[action] - min(rewards)) / (max(rewards) - min(rewards) + 1e-8) # * request.relative_position
 
@@ -351,8 +351,6 @@ class RLGlobalScheduler(BaseGlobalScheduler):
         # --b。 如果当前batch已满，计算排队时间作为reward  Waiting time
 
         # 直接参与batch
-        replica_scheduler = self._replica_schedulers[action]
-
         # 计算current batch，要么已经组成batch，要么在preempted_queue中
         replica_stage_scheduler = replica_scheduler.get_replica_stage_scheduler(0)  # assume no parallelism
         current_batch = replica_stage_scheduler.get_current_batch()
@@ -392,7 +390,7 @@ class RLGlobalScheduler(BaseGlobalScheduler):
                 replica_stage_scheduler.stage_id,
             )
             reward_of_time -= predict_time.total_time * num_predict_batches
-        return 5 * reward_of_time
+        return 0.5 * reward_of_kv + 5 * reward_of_time
         if true:
             pass
         else:
@@ -441,6 +439,67 @@ class RLGlobalScheduler(BaseGlobalScheduler):
             f"reward_of_kv: {reward_of_kv}, reward_of_evict: {reward_of_evict}, reward_of_time: {reward_of_time}")
 
         return 0.1 * reward_of_kv + 10 * reward_of_time + 0.0001 * reward_of_evict
+
+    def cal_rewardv2(self, action, request: FullRequest):
+        replica_scheduler = self._replica_schedulers[action]
+        assert isinstance(replica_scheduler, LocalReplicaScheduler), "scheduler type error."
+        reuse_kv, _ = replica_scheduler.tree_cache.match_prefix(request.input_token_ids)
+
+        replica_stage_scheduler = replica_scheduler.get_replica_stage_scheduler(0)  # assume no parallelism
+        current_batch = replica_stage_scheduler.get_current_batch()
+        num_tokens = current_batch.num_tokens if current_batch is not None else []
+        requests = current_batch.requests if current_batch is not None else []
+
+        if hasattr(replica_scheduler, "_preempted_requests") and len(requests) == 0:
+            requests = replica_scheduler._preempted_requests
+            num_tokens = [req.num_prefill_tokens - req.num_generated_tokens for req in requests if
+                          req.is_prefill_completed is False]
+
+        # waiting time
+        prefill_token = min(request.num_prefill_tokens - len(reuse_kv), self.chunk_size - sum(num_tokens))
+        assert 0 <= prefill_token <= request.num_prefill_tokens
+
+        # 如果要排队，当前request在local_replica_scheduler里已经加入virtual_pending_queue了
+        pending_queue = self.get_replica_scheduler(action).get_pending_requests() + self.virtual_pending_queue[action][
+            :-1]
+
+        waiting_time = 0.0
+        if prefill_token == 0 or len(pending_queue) > 0:
+            num_pending_tokens = sum([req.num_prefill_tokens for req in pending_queue])
+            num_predict_batches = ceil(
+                num_pending_tokens / self._config.cluster_config.replica_scheduler_config.chunk_size)
+
+            current_batch = Batch(action, requests, num_tokens)
+            predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
+                current_batch,
+                replica_stage_scheduler.stage_id,
+            )
+            waiting_time = predict_time.total_time * num_predict_batches
+
+        # calculate TTFT
+        num_prefill_tokens = request.num_prefill_tokens - len(reuse_kv)
+        num_prefill_batches = ceil(
+            num_prefill_tokens / self._config.cluster_config.replica_scheduler_config.chunk_size
+        )
+        prefill_batch = Batch(action, [request], [num_prefill_tokens if num_prefill_batches == 1 else
+                                                  self._config.cluster_config.replica_scheduler_config.chunk_size])
+        predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
+            prefill_batch,
+            replica_stage_scheduler.stage_id,
+        )
+        TTFT = predict_time.total_time * num_prefill_batches
+
+        # calculate TPOT
+        #if current_batch is None:
+        #   current_batch = Batch(action, requests, num_tokens)
+
+        #predict_time = replica_stage_scheduler.execution_time_predictor.get_execution_time(
+        #    current_batch,
+        #    replica_stage_scheduler.stage_id,
+        #)
+        TPOT = replica_stage_scheduler.execute_time if replica_stage_scheduler.execute_time is not None else predict_time.total_time
+
+        return -(waiting_time + TTFT + TPOT * request.num_decode_tokens)
 
 
     def step(self, action, request: FullRequest):

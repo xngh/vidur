@@ -33,8 +33,9 @@ class BatchEndEvent(BaseEvent):
         # trigger next FullRequest for App
         new_request_events = []
         for request in self._batch.requests:
-            if request._completed and isinstance(request, FullRequest):
-                content = request.input_str + request.output_str
+            if isinstance(request, FullRequest) and request.parent_unified_request.is_current_step_finished(): # request._completed and isinstance(request, FullRequest):
+                # content = request.input_str + request.output_str
+                content = request.parent_unified_request.context_information
                 next_requests = request.parent_unified_request.get_next_requests(self.time, content)
 
                 if len(next_requests) == 0:
@@ -45,6 +46,7 @@ class BatchEndEvent(BaseEvent):
                         RequestArrivalEvent(self.time, next_request)
                     )
                     logger.debug(f"Add a new request {next_request.req_id} to event queue:")
+                request.parent_unified_request.context_information = ""
 
 
 

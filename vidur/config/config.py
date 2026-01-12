@@ -274,6 +274,28 @@ class ShareGPTRequestGeneratorConfig(BaseRequestGeneratorConfig):
     def get_type():
         return RequestGeneratorType.UNIFIED
 
+@dataclass
+class MapReduceRequestGeneratorConfig(BaseRequestGeneratorConfig):
+    trace_file: str = field(
+        default="data/map_reduce/agent_trace_data.json",
+        metadata={"help": "Path to the map-reduce trace request generator file."},
+    )
+    start_time: float = field(
+        default=0.0,
+        metadata={"help": "Start time for the map-reduce request generator."},
+    )
+    interval_generator_config: PoissonRequestIntervalGeneratorConfig = field(
+        default_factory=PoissonRequestIntervalGeneratorConfig,
+        metadata={"help": "Config for the PoissonRequestIntervalGenerator."},
+    )
+    max_tokens: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the trace request generator."},
+    )
+
+    @staticmethod
+    def get_type():
+        return RequestGeneratorType.MAPREDUCE
 
 @dataclass
 class BaseReplicaSchedulerConfig(BasePolyConfig):
@@ -742,6 +764,18 @@ class RlConfig:
     load_model_path: str = field(
         default=None,
         metadata={"help": "Load model path."},
+    )
+    use_attn: bool = field(
+        default=False,
+        metadata={"help": "Use cross attention model."},
+    )
+    req_feature_dim: int = field(
+        default=4,
+        metadata={"help": "Request feature dimension."},
+    )
+    engine_feature_dim: int = field(
+        default=38,
+        metadata={"help": "Engine feature dimension."},
     )
 
 
