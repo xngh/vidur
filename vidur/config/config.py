@@ -277,7 +277,7 @@ class ShareGPTRequestGeneratorConfig(BaseRequestGeneratorConfig):
 @dataclass
 class MapReduceRequestGeneratorConfig(BaseRequestGeneratorConfig):
     trace_file: str = field(
-        default="data/map_reduce/agent_trace_data.json",
+        default="data/map_reduce/MapReduceTrace.json",
         metadata={"help": "Path to the map-reduce trace request generator file."},
     )
     start_time: float = field(

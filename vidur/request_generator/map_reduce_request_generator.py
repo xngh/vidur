@@ -54,7 +54,6 @@ class MapReduceRequestGenerator(BaseRequestGenerator):
     def generate_requests(self) -> List[UnifiedRequest]:
         requests = []
 
-        # 5. 遍历 JSON 列表中的每一个工作流项
         for workflow_item in self.trace_data:
             # 获取下一个 Poisson 到达间隔并累加时间
             inter_request_time = self.poisson_request_interval_generator.get_next_inter_request_time()

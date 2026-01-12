@@ -24,6 +24,7 @@ class FullRequest(Request):
         parent_unified_request: Optional['UnifiedRequest'] = None, 
         num_processed_tokens: int = 0,
         max_tokens: int = 4096,
+        is_parallelizable: bool = False,
     ):
         self.req_id = req_id
         self.input_str = input_str
@@ -63,6 +64,7 @@ class FullRequest(Request):
         self.max_tokens = max_tokens              # 用于归一化request state
         self.relative_position = 0 if self.parent_unified_request.total_steps == 1 \
             else self.parent_unified_request.current_step_index / (self.parent_unified_request.total_steps - 1)
+        self.is_parallelizable = is_parallelizable
 
     # --- Reload Request Methods ---
 
@@ -212,5 +214,7 @@ class FullRequest(Request):
 
         # 当前request在 workflow中的位次
         state.append(self.relative_position)
+        # 当前request的并行度 0 or N
+        state.append(self.is_parallelizable)
 
         return state

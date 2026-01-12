@@ -64,10 +64,7 @@ class UnifiedRequest:
             self.workflow_status = UnifiedRequestStatus.RUNNING 
 
     # 这个函数应该会在上一个full_request结束的event中调用或者初始时，用于发射下一个request
-    # TODO(yinhan): 需要把上一个FullRequest的输入和输出作为history传入 已完成
-    # TODO(yinhan): 对于map-reduce类型的agent，content应该是多个request的结果的和
-    #             同时只有在同一个step的最后一个任务完成时才会产生后续step的任务，意味着
-    #             这个函数返回可能是[], 要确保相应逻辑能够处理空的状态
+    # TODO(yinhan): 这里对于full request是否可以并行的逻辑实现得比较粗糙，后续可以考虑实现图结构
     def get_next_requests(self, current_time: float, content: str = "") -> List[FullRequest]:
         """
         Retrieve all FullRequests that need to be initiated in the current step.
@@ -117,7 +114,11 @@ class UnifiedRequest:
 
                 new_requests.append(next_request)
                 self.request_counter += 1
-        
+
+        if len(new_requests) > 1:
+            for req in new_requests:
+                req.is_parallelizable = True
+
         self.active_requests.extend(new_requests)
         return new_requests
 
@@ -131,7 +132,9 @@ class UnifiedRequest:
 
         self.active_requests.remove(finished_request)
         self.context_information += finished_request.input_str
+        self.context_information += " "
         self.context_information += finished_request.output_str
+        self.context_information += " "
 
         if not self.active_requests:
             self.current_step_index += 1

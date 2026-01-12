@@ -1,7 +1,8 @@
-
+from vidur.request_generator.map_reduce_request_generator import MapReduceRequestGenerator
 from vidur.scheduler.replica_scheduler.local_replica_scheduler import LocalReplicaScheduler
 from vidur.entities.replica import Replica
-from vidur.config.config import BaseReplicaSchedulerConfig, ReplicaConfig
+from vidur.config.config import BaseReplicaSchedulerConfig, ReplicaConfig, PoissonRequestIntervalGeneratorConfig, \
+    MapReduceRequestGeneratorConfig
 from vidur.request_generator import RequestGeneratorRegistry
 
 from vidur.entities.full_request import FullRequest 
@@ -253,5 +254,46 @@ def test_scheduler():
     batch.on_batch_end(0.5)
     scheduler.on_batch_end(batch)
 
+def test_map_reduce_content_information():
+    # 测试 map-reduce workflow下 上下文信息能否正常传递
+    scheduler = init_test_scheduler()
+
+    interval_cfg = PoissonRequestIntervalGeneratorConfig(qps=0.5)
+
+    config = MapReduceRequestGeneratorConfig(
+        trace_file="data/map_reduce/test.json",
+        interval_generator_config=interval_cfg,  # 传入嵌套配置
+    )
+    generator = MapReduceRequestGenerator(config)
+
+    apps = generator.generate_requests()
+
+    reqs = apps[0].get_next_requests(0, apps[0].context_information)
+
+    for req in reqs:
+        scheduler.add_request(req)
+
+    batch = scheduler._get_next_batch()
+    batch.on_batch_end(0)
+    scheduler.on_batch_end(batch)
+
+    print(apps[0].context_information)
+    reqs = apps[0].get_next_requests(0, apps[0].context_information)
+
+    assert len(reqs) == 0, "error"
+
+    batch = scheduler._get_next_batch()
+    batch.on_batch_end(0.2)
+    scheduler.on_batch_end(batch)
+
+    print(apps[0].context_information)
+    reqs = apps[0].get_next_requests(0.2, apps[0].context_information)
+
+    assert len(reqs) == 1, "error"
+    print(reqs[0].input_str)
+
+    for req in reqs:
+        scheduler.add_request(req)
+
 if __name__ == "__main__":
-    test_scheduler()
+    test_map_reduce_content_information()
