@@ -25,7 +25,7 @@ class MapReduceRequestGenerator(BaseRequestGenerator):
         self.max_tokens = config.max_tokens
 
     def generate_unified_request(self, arrive_at, workflow_data: Dict) -> UnifiedRequest:
-        workflow_id = workflow_data["workflow_id"]
+        workflow_id = workflow_data["agent_id"]
 
         workflow_steps_config = []
         step_count = 0

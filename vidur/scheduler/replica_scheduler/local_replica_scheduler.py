@@ -91,11 +91,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         if num_blocks == 0:
             return 
         
-        # 分配新 Block
-        # 这里的逻辑比较不合理. 一个block可以存储block size大小的token kv。 对于decode阶段的request，每个token算出来都需要 1 block
-        # 就会导致后续相当于每个block只存了一个token的kv eg. [0,0,0,0,1,2,3,4](block_size = 4)
-        # 因此需要考虑复用已分配，slot还未满的block, 这也是sarathi的allocate_request中的 line 48 -49的逻辑
-        # 我把这部分逻辑补充在上方
+
         new_blocks = [self.block_manager.allocate_block() for _ in range(num_blocks)]
         
         # 转成冗余的 block id 列表

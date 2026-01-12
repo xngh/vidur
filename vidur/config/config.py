@@ -770,7 +770,7 @@ class RlConfig:
         metadata={"help": "Use cross attention model."},
     )
     req_feature_dim: int = field(
-        default=4,
+        default=5,
         metadata={"help": "Request feature dimension."},
     )
     engine_feature_dim: int = field(
