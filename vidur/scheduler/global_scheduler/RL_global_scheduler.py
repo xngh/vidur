@@ -214,17 +214,6 @@ class RLGlobalScheduler(BaseGlobalScheduler):
 
 
 
-    def reset(self):
-        self.state = None
-
-        self.update_count = 0
-        self.episode_count = 0
-        self.returns = []
-        self.policy_loss = []
-        self.value_loss = []
-
-        self.virtual_pending_queue = [[] for i in range(self._num_replicas)]
-
     # 这里要考虑action 与 replica_id 的关系  允不允许不调度这个request，把它放后面调度？暂时认为都调度
     def schedule(self) -> List[Tuple[int, Request]]:
         self.sort_requests()
@@ -250,6 +239,8 @@ class RLGlobalScheduler(BaseGlobalScheduler):
             num_request += 1
             loss = self.agent.train()
 
+            if request.id == 3101:
+                print("hook here.")
             if isinstance(self.agent, DQN) and loss is not None:
                 self.policy_loss.append(loss)
                 self.update_count += 1

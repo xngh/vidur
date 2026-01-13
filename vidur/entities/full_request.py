@@ -48,7 +48,7 @@ class FullRequest(Request):
         num_decode_tokens = len(self.output_token_ids)
         super().__init__(arrived_at, num_prefill_tokens, num_decode_tokens, 
                          num_processed_tokens)
-        
+
         # --- KV Cache Block ---
         # 存储分配给这个请求的 物理 Block ID
         self.block_table: List[int] = []  # 这里存储冗余的block id
@@ -122,7 +122,7 @@ class FullRequest(Request):
         # when we restart the request, we can process all the previously
         # decoded tokens in parallel (i.e., we can prefill all the tokens)
         total_tokens = self._num_prefill_tokens + self._num_decode_tokens
-        self._num_prefill_tokens = self._num_processed_tokens
+        self._num_prefill_tokens = self._num_prefill_tokens
         self._num_decode_tokens = total_tokens - self._num_prefill_tokens
         self.fill_ids = []
         self.generated_token_ids = []

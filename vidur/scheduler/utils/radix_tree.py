@@ -162,7 +162,9 @@ class RadixCache(BasePrefixCache):
         block_ids = req.get_block_table()[:len(token_ids)]
 
         keys = req.fill_ids
-        assert len(req.fill_ids) == len(token_ids)
+        if len(keys) != len(token_ids):
+            print("get here")
+        assert len(req.fill_ids) == len(token_ids), f"{len(req.fill_ids)} != {len(token_ids)}"
         keys = self._page_align_keys(keys)
         #values = kv_indices[: len(keys)].to(dtype=torch.int64, copy=True)
         values = block_ids[: len(keys)]

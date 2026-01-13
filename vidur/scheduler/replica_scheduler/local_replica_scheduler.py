@@ -107,7 +107,6 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
 
     # TODO(yinhan): 感觉可以把match_prefix的操作全部放到 处于prefill阶段的request才做，然后重新组织一下这边代码的逻辑
     def _can_allocate_request(self, request: FullRequest) -> bool:
-
         if request.id not in self._allocation_map:
             # new request
             # 不管是no cached，partial cached 还是 total cached，在prefill阶段只allocate一次
@@ -146,8 +145,8 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
                 self.block_manager.decrement_ref_for_blocks(reused_block_ids)
             return re
         else:
-            num_tokens_reserved = len(request.block_table)
-            num_tokens_required = max(0, request.num_processed_tokens - num_tokens_reserved)
+            num_tokens_reserved = self._allocation_map[request.id] * self._config.block_size
+            num_tokens_required = 0 if num_tokens_reserved - len(request.block_table) > 0 else 1
 
             assert (
                     num_tokens_required == 0 or num_tokens_required == 1
@@ -318,6 +317,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
                 skipped_requests.append(request)
                 continue
 
+
             while not self._can_allocate_request(request):
                 # 无法分配时
                 # 把preempted requests的最后一个放回request队列的头部
@@ -328,7 +328,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
                     self._request_queue = [victim_request] + self._request_queue
                 else:
                     # 如果没有可抢占的request，则把当前request放回队列的开头
-                    self._free_request([request.id])
+                    self._free_request([request])
                     request.restart()
                     self._request_queue = [request] + self._request_queue
                     break
@@ -364,7 +364,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
         skipped_requests = []
 
         while self._request_queue:
-            if self._request_queue[0].id == 2334:
+            if self._request_queue[0].id == 3101 and self._request_queue[0].num_prefill_tokens != len(self._request_queue[0].input_token_ids):
                 print("hook here.")
             if len(self._allocation_map) == self._config.batch_size_cap:
                 break
@@ -419,7 +419,7 @@ class LocalReplicaScheduler(BaseReplicaScheduler):
             # 会从last开始往祖先回溯，全部 - 1
             # 由于 cache_finished_req 时会dec_lock_ref一次，因此只对还未完成的request做该操作
             if not request.completed:
-                self.tree_cache.dec_lock_ref(request.last_node)
+                self.tree_cache.dec_lock_ref(request.last_node, request.id)
 
     def cache_request(self, request: FullRequest) -> None:
         if request.completed:
