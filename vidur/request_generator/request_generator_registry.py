@@ -1,3 +1,4 @@
+from vidur.request_generator.map_reduce_request_generator import MapReduceRequestGenerator
 from vidur.request_generator.synthetic_request_generator import (
     SyntheticRequestGenerator,
 )
@@ -23,4 +24,8 @@ RequestGeneratorRegistry.register(
 )
 RequestGeneratorRegistry.register(
     RequestGeneratorType.UNIFIED, ShareGPTRequestGenerator
+)
+
+RequestGeneratorRegistry.register(
+    RequestGeneratorType.MAPREDUCE, MapReduceRequestGenerator
 )

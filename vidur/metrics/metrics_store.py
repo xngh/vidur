@@ -8,6 +8,7 @@ import wandb
 
 from vidur.config import HeterClusterConfig, SimulationConfig
 from vidur.entities import Batch, BatchStage, ExecutionTime, Request
+from vidur.entities.full_request import FullRequest
 from vidur.logger import init_logger
 from vidur.metrics.cdf_sketch import CDFSketch
 from vidur.metrics.constants import (
@@ -20,6 +21,7 @@ from vidur.metrics.constants import (
     RequestMetricsTimeDistributions,
     TokenCompletionMetricsTimeSeries,
     TokenMetricsTimeDistribution,
+    WorkflowMetrics,
 )
 from vidur.metrics.data_series import DataSeries
 from vidur.metrics.series_average_meter import SeriesAverageMeter
@@ -37,6 +39,7 @@ def if_write_metrics(func):
 
 
 REQUEST_ID_STR = "Request Id"
+WORKFLOW_ID_STR = "Workflow Id"
 COUNT_STR = "Count"
 TIME_STR = "Time (sec)"
 BATCH_ID_STR = "Batch Id"
@@ -259,6 +262,16 @@ class MetricsStore:
                     )
                 )
                 self._replica_mfu[replica_idx][stage_idx].put(0, 0)
+
+        self._workflow_metrics: Dict[WorkflowMetrics, DataSeries] = {}
+        for metric_name in WorkflowMetrics:
+            self._workflow_metrics[metric_name] = DataSeries(
+                WORKFLOW_ID_STR,  # Key 名字
+                metric_name.value,
+                self._config.subsamples,
+                self._config.save_table_to_wandb,
+                self._config.store_plots,
+            )
 
         self._init_wandb()
 
@@ -502,6 +515,16 @@ class MetricsStore:
                     base_plot_path,
                 )
 
+    def _store_workflow_metrics(self, base_plot_path: str):
+        self._save_as_csv(
+            dataseries_list=list(self._workflow_metrics.values()),
+            key_to_join="Workflow Id",
+            base_path=self._config.output_dir,
+            file_name="workflow_metrics",
+        )
+        for dataseries in self._workflow_metrics.values():
+            dataseries.plot_cdf(base_plot_path, dataseries._y_name, TIME_STR)
+    
     @if_write_metrics
     def plot(self) -> None:
         dir_plot_path = f"{self._config.output_dir}/plots"
@@ -512,6 +535,7 @@ class MetricsStore:
         self._store_completion_metrics(dir_plot_path)
         self._store_operation_metrics(dir_plot_path)
         self._store_utilization_metrics(dir_plot_path)
+        self._store_workflow_metrics(dir_plot_path)
 
     @if_write_metrics
     def on_request_arrival(self, time: float, request: Request) -> None:
@@ -848,3 +872,17 @@ class MetricsStore:
             return
         self._replica_busy_time[replica_id - 1][stage_id - 1].put(time, 0)
         self._replica_mfu[replica_id - 1][stage_id - 1].put(time, 0)
+
+    @if_write_metrics
+    def on_workflow_end(self, request: FullRequest, time: float):
+        # Workflow E2E: 当前时间 - 最初达到的时间
+        workflow_e2e_plus_preempted = time - request.parent_unified_request.arrive_at
+
+        workflow_e2e = getattr(request.parent_unified_request, 'total_time', 0)
+
+        self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_TIME].put(
+            request.parent_unified_request.workflow_id, workflow_e2e
+        )
+        self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_PLUS_PREEMPTION_TIME].put(
+            request.parent_unified_request.workflow_id, workflow_e2e_plus_preempted
+        )

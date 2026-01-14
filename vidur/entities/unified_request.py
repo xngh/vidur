@@ -21,6 +21,7 @@ class UnifiedRequest:
         arrive_at: float,
         workflow_config: List[Dict],  # 假设格式为: List[{"step": str, "input_str": str, "output_str": str}]
         max_token_for_request: int = 4096,
+        deadline: float = 0.0,
     ):
         self.workflow_id = workflow_id
         self.arrive_at = arrive_at
@@ -41,7 +42,7 @@ class UnifiedRequest:
         self.max_token_for_request = max_token_for_request   # for search data from profile data
 
         self.context_information = ""
-
+        self.deadline = deadline   # deadline是仿真中的绝对时间（arrive_at + slo = deadline）
 
     def _initialize_step_names(self):
         """

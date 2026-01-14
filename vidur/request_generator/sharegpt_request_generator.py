@@ -1,13 +1,11 @@
 import logging
+import random
 from typing import List, Dict
-from urllib import request
 
 import pandas as pd
 
 from vidur.config import ShareGPTRequestGeneratorConfig
-from vidur.entities import Request
 from vidur.entities.unified_request import UnifiedRequest
-from vidur.entities.full_request import FullRequest
 from vidur.request_generator.base_request_generator import BaseRequestGenerator
 from vidur.request_generator.poisson_request_interval_generator import PoissonRequestIntervalGenerator
 
@@ -20,6 +18,31 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             config.interval_generator_config
         )
         self.time = config.start_time
+        self.max_tokens = config.max_tokens
+
+        # NOTE: 以下分位点为示例占位值，可根据最新仿真数据替换
+        # 单位: 秒；假设为 ShareGPT 对话型请求的 e2e runtime P50/P70/P90
+        self._p50_runtime = 1.0
+        self._p70_runtime = 2.0
+        self._p90_runtime = 4.0
+
+    def _sample_deadline_budget(self) -> float:
+        """
+        按照给定分段概率与安全系数生成相对 deadline（秒）。
+        分段概率: [0.6, 0.3, 0.1] -> [P50,P70], [P70,P90], [P90, 1.5*P90]
+        安全系数: 乘以 U(1.05, 1.20)
+        """
+        p = random.random()
+        if p < 0.6:
+            base_budget = random.uniform(self._p50_runtime, self._p70_runtime)
+        elif p < 0.9:
+            base_budget = random.uniform(self._p70_runtime, self._p90_runtime)
+        else:
+            upper = 1.5 * self._p90_runtime
+            base_budget = random.uniform(self._p90_runtime, upper)
+
+        safety = random.uniform(1.05, 1.20)
+        return base_budget * safety
 
     # TODO: 后一个request，是否需要把前一个request的input和output拼接起来作为history
     def generate_unified_request(self, arrive_at, row) -> UnifiedRequest:
@@ -55,7 +78,10 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
         request = UnifiedRequest(
             workflow_id = id,
             workflow_config=workflow_steps_config,
-            arrive_at = arrive_at
+            arrive_at = arrive_at,
+            max_token_for_request = self.max_tokens,
+            # deadline 为绝对时间：到达时间 + 抽样得到的相对预算
+            deadline = arrive_at + self._sample_deadline_budget(),
         )
         return request
 
@@ -66,6 +92,10 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             self.time += next_time
             request = self.generate_unified_request(self.time, row)
             requests.append(request)
+
+            if len(requests) >= 8000:
+                break
+
         return requests
 
 

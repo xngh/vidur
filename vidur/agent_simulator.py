@@ -10,7 +10,6 @@ from vidur.logger import init_logger
 from vidur.metrics import MetricsStore
 from vidur.request_generator import RequestGeneratorRegistry
 from vidur.scheduler import BaseGlobalScheduler, GlobalSchedulerRegistry
-from vidur.scheduler.global_scheduler.RL_global_scheduler import RLGlobalScheduler
 
 logger = init_logger(__name__)
 

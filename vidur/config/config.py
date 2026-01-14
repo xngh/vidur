@@ -380,6 +380,14 @@ class LocalReplicaSchedulerConfig(BaseReplicaSchedulerConfig):
         default=512,
         metadata={"help": "Chunk size for Local Scheduler."},
     )
+    bin_width: int = field(
+        default= 256,
+        metadata={"help": "Bin width for describe requests' token distribution."},
+    )
+    max_tokens_per_request: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the request in trace."},
+    )
     @staticmethod
     def get_type():
         return ReplicaSchedulerType.LOCAL
