@@ -27,9 +27,18 @@ class MapReduceRequestGenerator(BaseRequestGenerator):
 
         # NOTE: 以下分位点为示例占位值，可根据最新仿真数据替换
         # 单位: 秒；假设为 workflow 级 e2e runtime 的 P50/P70/P90
-        self._p50_runtime = 3.0
-        self._p70_runtime = 5.0
-        self._p90_runtime = 8.0
+        self._p50_runtime = 5.0
+        self._p70_runtime = 8.0
+        self._p90_runtime = 12.0
+        
+        #设置一个随机数种子，保证deadline生成是可复现的。
+        seed = getattr(config, "seed", None) or config.get("seed", None)
+        if seed is not None:
+            random.seed(seed)
+        else:
+            seed = 42 
+            random.seed(seed)
+
 
     def _sample_deadline_budget(self) -> float:
         """

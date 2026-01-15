@@ -25,6 +25,14 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
         self._p50_runtime = 1.0
         self._p70_runtime = 2.0
         self._p90_runtime = 4.0
+        
+         #设置一个随机数种子，保证deadline生成是可复现的。
+        seed = getattr(config, "seed", None) or config.get("seed", None)
+        if seed is not None:
+            random.seed(seed)
+        else:
+            seed = 42 
+            random.seed(seed)
 
     def _sample_deadline_budget(self) -> float:
         """
@@ -93,7 +101,7 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             request = self.generate_unified_request(self.time, row)
             requests.append(request)
 
-            if len(requests) >= 8000:
+            if len(requests) >= 3000:
                 break
 
         return requests

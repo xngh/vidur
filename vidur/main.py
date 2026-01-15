@@ -15,7 +15,9 @@ def main() -> None:
 
 
 def mainv2() -> None:
-    config: SimulationConfig = SimulationConfig.create_from_cli_args()
+    # config: SimulationConfig = SimulationConfig.create_from_cli_args()
+    # 支持传入 --cluster_config_replica_configs 做异构集群配置
+    config: SimulationConfig = SimulationConfig.create_from_cli_args_heter_full()
 
     set_seeds(config.seed)
 

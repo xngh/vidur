@@ -97,3 +97,4 @@ class RlTrainingMetrics(enum.Enum):
 class WorkflowMetrics(enum.Enum):
     WORKFLOW_E2E_TIME = "workflow_e2e_time"
     WORKFLOW_E2E_PLUS_PREEMPTION_TIME = "workflow_e2e_plus_preemption_time"
+    WORKFLOW_SLO_ATTAINMENT = "workflow_slo_attainment"

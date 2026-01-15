@@ -522,8 +522,9 @@ class MetricsStore:
             base_path=self._config.output_dir,
             file_name="workflow_metrics",
         )
-        for dataseries in self._workflow_metrics.values():
-            dataseries.plot_cdf(base_plot_path, dataseries._y_name, TIME_STR)
+        for metric_enum, dataseries in self._workflow_metrics.items():
+            y_label = COUNT_STR if metric_enum == WorkflowMetrics.WORKFLOW_SLO_ATTAINMENT else TIME_STR
+            dataseries.plot_cdf(base_plot_path, dataseries._y_name, y_label)
     
     @if_write_metrics
     def plot(self) -> None:
@@ -886,3 +887,10 @@ class MetricsStore:
         self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_PLUS_PREEMPTION_TIME].put(
             request.parent_unified_request.workflow_id, workflow_e2e_plus_preempted
         )
+        # SLO attainment: 1 if completed before deadline, else 0 (only when deadline is set)
+        deadline = getattr(request.parent_unified_request, "deadline", 0)
+        if deadline and deadline > 0:
+            attained = 1 if time <= deadline else 0
+            self._workflow_metrics[WorkflowMetrics.WORKFLOW_SLO_ATTAINMENT].put(
+                request.parent_unified_request.workflow_id, attained
+            )
