@@ -555,6 +555,13 @@ class LORGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
 
 
 @dataclass
+class SharpGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
+    @staticmethod
+    def get_type():
+        return GlobalSchedulerType.SHARP
+
+
+@dataclass
 class BaseExecutionTimePredictorConfig(BasePolyConfig):
     compute_input_file: str = field(
         default="./data/profiling/compute/{DEVICE}/{MODEL}/mlp.csv",
@@ -765,6 +772,13 @@ class SimulationConfig(ABC):
         instance.__flat_config__ = flat_config
         # 覆盖cluster_config为heter_cluster_config
         if heter_cluster_config is not None:
+            #cluster_config包括：Replica配置，scheduler配置。注意这里scheduler的配置要从instance里面提取一下，不然相当于用默认配置了。
+            heter_cluster_config.global_scheduler_config = (
+                instance.cluster_config.global_scheduler_config
+            )
+            heter_cluster_config.replica_scheduler_config = (
+                instance.cluster_config.replica_scheduler_config
+            )
             instance.cluster_config = heter_cluster_config
         return instance
 

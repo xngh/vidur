@@ -785,35 +785,52 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
         return prefill_params
 
     def _get_attention_layer_pre_proj_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["attn_pre_proj"][(batch._total_num_tokens_rounded,)]
 
     def _get_attention_layer_post_proj_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["attn_post_proj"][(batch._total_num_tokens_rounded,)]
 
     def _get_mlp_layer_up_proj_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["mlp_up_proj"][(batch._total_num_tokens_rounded,)]
 
     def _get_mlp_layer_down_proj_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["mlp_down_proj"][(batch._total_num_tokens_rounded,)]
 
     def _get_mlp_layer_act_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["mlp_act"][(batch._total_num_tokens_rounded,)]
 
     def _get_attn_norm_layer_act_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["input_layernorm"][(batch._total_num_tokens_rounded,)]
 
     def _get_mlp_norm_layer_act_execution_time(self, batch: Batch) -> float:
         if not self._model_config.post_attn_norm:
             return 0
-
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["post_attention_layernorm"][
             (batch._total_num_tokens_rounded,)
         ]
 
     def _get_add_layer_act_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["add"][(batch._total_num_tokens_rounded,)]
 
     def _get_tensor_parallel_communication_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return (
             self._predictions["all_reduce"][(batch._total_num_tokens_rounded,)]
             + self._config.nccl_cpu_launch_overhead_ms
@@ -823,19 +840,24 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
 
     def _get_pipeline_parallel_communication_time(self, batch: Batch) -> float:
         try:
+            if batch._total_num_tokens_rounded == 0:
+                return 0.0
             return self._predictions["send_recv"][(batch._total_num_tokens_rounded,)]
         except KeyError as e:
             logger.error(f"Failed to get send_recv prediction for batch {batch}")
             raise e
 
     def _get_attention_rope_execution_time(self, batch: Batch) -> float:
+        if batch._total_num_tokens_rounded == 0:
+            return 0.0
         return self._predictions["attn_rope"][(batch._total_num_tokens_rounded,)]
 
     def _get_attention_kv_cache_save_execution_time(self, batch: Batch) -> float:
         # don't use round up to the nearest multiple of 8 here, because we want to
         # predict the execution time for the exact number of tokens
         num_tokens = sum(batch.num_tokens)
-
+        if num_tokens == 0:
+            return 0.0
         return self._predictions["attn_kv_cache_save"][(num_tokens,)]
 
     def _get_attention_decode_execution_time(self, batch: Batch) -> float:
@@ -865,13 +887,41 @@ class SklearnExecutionTimePredictor(BaseExecutionTimePredictor):
         agg_kv_cache_size = sum(kv_cache_sizes)
         agg_prefill_chunk_size = sum([x**2 for x in prefill_chunk_sizes]) ** 0.5
 
-        return self._predictions["attn_prefill"][
-            (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
-        ] * (
-            1
-            + self._attention_prefill_batching_overhead_fraction
-            * int(len(prefill_params) > 1)
+        # 表示该batch中的 prefill 都是可以复用的
+        if agg_kv_cache_size == 0 or agg_prefill_chunk_size == 0:
+            return 0
+
+
+        # assert (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2) in self._predictions["attn_prefill"], f"no data with key: {(agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)}"
+        query_key = (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
+        # 尝试直接获取
+        if query_key in self._predictions["attn_prefill"]:
+            prediction = self._predictions["attn_prefill"][query_key]
+        else:
+            # 如果没找到，搜索最近的 key
+            all_keys = list(self._predictions["attn_prefill"].keys())
+            if not all_keys:
+                return 0
+
+            # 将 keys 转换为 numpy 数组进行快速距离计算
+            keys_array = np.array(all_keys)
+            distances = np.linalg.norm(keys_array - np.array(query_key), axis=1)
+            nearest_key = all_keys[np.argmin(distances)]
+
+            prediction = self._predictions["attn_prefill"][nearest_key]
+
+        return prediction * (
+                1
+                + self._attention_prefill_batching_overhead_fraction
+                * int(len(prefill_params) > 1)
         )
+        # return self._predictions["attn_prefill"][
+        #    (agg_kv_cache_size, round(agg_prefill_chunk_size) ** 2)
+        # ] * (
+        #    1
+        #    + self._attention_prefill_batching_overhead_fraction
+        #    * int(len(prefill_params) > 1)
+        #)
 
     def _get_schedule_time(self, batch: Batch) -> float:
         if self._config.skip_cpu_overhead_modeling:

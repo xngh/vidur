@@ -122,7 +122,7 @@ class FullRequest(Request):
         # when we restart the request, we can process all the previously
         # decoded tokens in parallel (i.e., we can prefill all the tokens)
         total_tokens = self._num_prefill_tokens + self._num_decode_tokens
-        self._num_prefill_tokens = self._num_processed_tokens
+        self._num_prefill_tokens = self._num_prefill_tokens
         self._num_decode_tokens = total_tokens - self._num_prefill_tokens
         self.fill_ids = []
         self.generated_token_ids = []

@@ -164,6 +164,7 @@ class RadixCache(BasePrefixCache):
         keys = req.fill_ids
         if len(keys) != len(token_ids):
             print("get here")
+            print(f"len of request prompt: {len(req.input_token_ids) + len(req.output_token_ids)}")
         assert len(req.fill_ids) == len(token_ids), f"{len(req.fill_ids)} != {len(token_ids)}"
         keys = self._page_align_keys(keys)
         #values = kv_indices[: len(keys)].to(dtype=torch.int64, copy=True)

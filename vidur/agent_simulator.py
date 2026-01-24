@@ -31,12 +31,14 @@ class AgentSimulator:
 
          # 同构/异构分支：HeterClusterConfig 走 from_heter_config，否则走原逻辑
         if isinstance(self._config.cluster_config, HeterClusterConfig):
+            print("HeterClusterConfig init")
             self._cluster = Cluster.from_heter_config(
                 self._config.cluster_config,
                 self._config.metrics_config,
                 self._config.request_generator_config,
             )
         else:
+            print("HomoClusterConfig init")
             self._cluster = Cluster(
                 self._config.cluster_config,
                 self._config.metrics_config,

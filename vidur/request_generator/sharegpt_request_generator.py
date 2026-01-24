@@ -55,6 +55,7 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
     # TODO: 后一个request，是否需要把前一个request的input和output拼接起来作为history
     def generate_unified_request(self, arrive_at, row) -> UnifiedRequest:
         id = row["id"]
+        # id = str(row["id"])
         conversations = row["conversations"]
 
         workflow_steps_config: List[List[Dict]] = []
@@ -101,7 +102,7 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
             request = self.generate_unified_request(self.time, row)
             requests.append(request)
 
-            if len(requests) >= 3000:
+            if len(requests) >= 2000:
                 break
 
         return requests
