@@ -13,13 +13,17 @@ from vidur.metrics.constants import WorkflowMetrics
 
 # 选择要绘制的指标（一次只画一个 CDF）
 # 可选值参考 WorkflowMetrics（定义在 vidur/metrics/constants.py）
+# METRIC_NAME = WorkflowMetrics.WORKFLOW_SLO_ATTAINMENT.value
 METRIC_NAME = WorkflowMetrics.WORKFLOW_E2E_TIME.value
-
 # 要对比的实验结果列表：name 用于图例，dir 指向单次运行的输出目录
 # 例如：/home/linchx/vidur/simulator_output/2026-01-29_21-01-02-820028
 RUNS = [
-    {"name": "parrot", "dir": "/home/linchx/vidur/simulator_output/2026-01-29_21-01-02-820028"},
-    {"name": "sharp", "dir": "/home/linchx/vidur/simulator_output/2026-01-29_21-03-52-262066"},
+    {"name": "sharp_local_qps_5", "dir": "/home/linchx/vidur/simulator_output/batch_runs/global_scheduler_config_type=sharp__request_generator_config_type=mapreduce__replica_scheduler_config_type=local__poisson_request_interval_generator_config_qps=5/2026-01-30_21-51-28-657225"},
+    {"name": "sharp_local_qps_6", "dir": "/home/linchx/vidur/simulator_output/batch_runs/global_scheduler_config_type=sharp__request_generator_config_type=mapreduce__replica_scheduler_config_type=local__poisson_request_interval_generator_config_qps=6/2026-01-30_21-51-28-152435"},
+    {"name": "sharp_local_qps_7", "dir": "/home/linchx/vidur/simulator_output/batch_runs/global_scheduler_config_type=sharp__request_generator_config_type=mapreduce__replica_scheduler_config_type=local__poisson_request_interval_generator_config_qps=7/2026-01-30_21-51-32-191275"},
+    {"name": "sharp_slo_qps_5", "dir": "/home/linchx/vidur/simulator_output/batch_runs/global_scheduler_config_type=sharp__request_generator_config_type=mapreduce__replica_scheduler_config_type=slo__poisson_request_interval_generator_config_qps=5/2026-01-30_21-51-28-640666"},
+    {"name": "sharp_slo_qps_6", "dir": "/home/linchx/vidur/simulator_output/batch_runs/global_scheduler_config_type=sharp__request_generator_config_type=mapreduce__replica_scheduler_config_type=slo__poisson_request_interval_generator_config_qps=6/2026-01-30_21-51-28-682174"},
+    {"name": "sharp_slo_qps_7", "dir": "/home/linchx/vidur/simulator_output/batch_runs/global_scheduler_config_type=sharp__request_generator_config_type=mapreduce__replica_scheduler_config_type=slo__poisson_request_interval_generator_config_qps=7/2026-01-30_21-51-27-823907"},
 ]
 
 # 输出目录（会自动创建）
@@ -65,7 +69,7 @@ def plot_multi_run_cdf(metric_name: str, runs: list[dict[str, str]]) -> Path:
 
     output_dir = OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{metric_name}_cdf_compare.png"
+    output_path = output_dir / f"{metric_name}_cdf_compare_mapreduce1000.png"
 
     plt.figure(figsize=(7, 5))
     for run in runs:
