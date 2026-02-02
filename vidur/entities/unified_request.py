@@ -23,6 +23,7 @@ class UnifiedRequest:
         max_token_for_request: int = 4096,
         deadline: float = 0.0,
     ):
+        self.session_id = workflow_id.split("_")[0]
         self.workflow_id = workflow_id
         self.arrive_at = arrive_at
         self.workflow_config = workflow_config

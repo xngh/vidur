@@ -6,3 +6,4 @@ class GlobalSchedulerType(BaseIntEnum):
     ROUND_ROBIN = 2
     LOR = 3
     SHARP = 4
+    PARROT = 5

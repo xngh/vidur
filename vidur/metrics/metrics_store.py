@@ -1,3 +1,4 @@
+import json
 import os
 from functools import reduce
 from typing import Dict, List
@@ -525,6 +526,87 @@ class MetricsStore:
         for metric_enum, dataseries in self._workflow_metrics.items():
             y_label = COUNT_STR if metric_enum == WorkflowMetrics.WORKFLOW_SLO_ATTAINMENT else TIME_STR
             dataseries.plot_cdf(base_plot_path, dataseries._y_name, y_label)
+
+    def _percentiles_from_dataseries(
+        self, dataseries: DataSeries, percentiles: List[float]
+    ) -> Dict[str, float]:
+        """
+        Compute percentiles over the Y values of a DataSeries.
+
+        Returns: {"p50": 1.23, "p90": 4.56}. Empty series -> {}.
+        """
+        df = dataseries._to_df()
+        if df.empty:
+            return {}
+        y = dataseries._y_name
+        out: Dict[str, float] = {}
+        for p in percentiles:
+            out[f"p{int(round(p * 100))}"] = float(df[y].quantile(p))
+        return out
+
+    def _mean_from_dataseries(self, dataseries: DataSeries) -> float:
+        df = dataseries._to_df()
+        if df.empty:
+            return float("nan")
+        y = dataseries._y_name
+        return float(df[y].mean())
+
+    def build_result_metrics(self) -> Dict:
+        """
+        Build a compact summary for this run.
+
+        You can freely edit/extend this function to add more metrics to result.json.
+        """
+        result: Dict = {
+            # workflow-level
+            "workflow_e2e_latency": self._percentiles_from_dataseries(
+                self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_TIME], [0.50, 0.90]
+            ),
+            "workflow_slo_attainment": self._mean_from_dataseries(
+                self._workflow_metrics[WorkflowMetrics.WORKFLOW_SLO_ATTAINMENT]
+            ),
+            # request-level (useful proxies, includes prefill)
+            "request_e2e_latency": self._percentiles_from_dataseries(
+                self._request_metrics_time_distributions[
+                    RequestMetricsTimeDistributions.REQUEST_E2E_TIME
+                ],
+                [0.50, 0.90],
+            ),
+            "prefill_time_e2e": self._percentiles_from_dataseries(
+                self._request_metrics_time_distributions[
+                    RequestMetricsTimeDistributions.PREFILL_TIME_E2E
+                ],
+                [0.50, 0.90],
+            ),
+        }
+
+        # --- Custom metrics space (edit/extend freely) ---
+        # Example: add P99 workflow latency
+        # result["workflow_e2e_latency"].update(
+        #     self._percentiles_from_dataseries(
+        #         self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_TIME], [0.99]
+        #     )
+        # )
+        #
+        # Example: prefill execution+preemption normalized latency (per token)
+        # result["prefill_exec_plus_preempt_norm"] = self._percentiles_from_dataseries(
+        #     self._request_metrics_time_distributions[
+        #         RequestMetricsTimeDistributions.PREFILL_TIME_EXECUTION_PLUS_PREEMPTION_NORMALIZED
+        #     ],
+        #     [0.50, 0.90],
+        # )
+
+        return result
+
+    def export_result_json(self) -> None:
+        """
+        Write `result.json` under metrics_config.output_dir (same folder as config.json).
+        """
+        os.makedirs(self._config.output_dir, exist_ok=True)
+        result_path = f"{self._config.output_dir}/result.json"
+        payload = {"metrics": self.build_result_metrics()}
+        with open(result_path, "w") as f:
+            json.dump(payload, f, indent=4)
     
     @if_write_metrics
     def plot(self) -> None:

@@ -16,6 +16,9 @@ from vidur.scheduler.replica_scheduler.vllm_replica_scheduler import (
 from vidur.scheduler.replica_scheduler.local_replica_scheduler import (
     LocalReplicaScheduler,
 )
+from vidur.scheduler.replica_scheduler.slo_replica_scheduler import (
+    SLOReplicaScheduler,
+)
 from vidur.types import ReplicaSchedulerType
 from vidur.utils.base_registry import BaseRegistry
 
@@ -35,4 +38,7 @@ ReplicaSchedulerRegistry.register(
 )
 ReplicaSchedulerRegistry.register(
     ReplicaSchedulerType.LOCAL, LocalReplicaScheduler
+)
+ReplicaSchedulerRegistry.register(
+    ReplicaSchedulerType.SLO, SLOReplicaScheduler
 )

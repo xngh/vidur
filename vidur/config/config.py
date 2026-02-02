@@ -279,7 +279,7 @@ class ShareGPTRequestGeneratorConfig(BaseRequestGeneratorConfig):
 @dataclass
 class MapReduceRequestGeneratorConfig(BaseRequestGeneratorConfig):
     trace_file: str = field(
-        default="data/map_reduce/MapReduceTrace.json",
+        default="data/map_reduce/MapReduceTraceNew.json",
         metadata={"help": "Path to the map-reduce trace request generator file."},
     )
     start_time: float = field(
@@ -391,6 +391,20 @@ class LocalReplicaSchedulerConfig(BaseReplicaSchedulerConfig):
     @staticmethod
     def get_type():
         return ReplicaSchedulerType.LOCAL
+
+
+@dataclass
+class SLOReplicaSchedulerConfig(LocalReplicaSchedulerConfig):
+    """
+    SLO-oriented local scheduler config.
+
+    Currently identical to `LocalReplicaSchedulerConfig`, but uses a distinct
+    scheduler type so it can be selected from CLI/config.
+    """
+
+    @staticmethod
+    def get_type():
+        return ReplicaSchedulerType.SLO
 
 @dataclass
 class MetricsConfig:
@@ -556,10 +570,24 @@ class LORGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
 
 @dataclass
 class SharpGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
+    exec_weight: float = field(
+        default=1.0,
+        metadata={"help": "Weight for request execution time in SharpGlobalScheduler."},
+    )
+    queue_weight: float = field(
+        default=0.1,
+        metadata={"help": "Weight for estimated queue time in SharpGlobalScheduler."},
+    )
+
     @staticmethod
     def get_type():
         return GlobalSchedulerType.SHARP
 
+@dataclass
+class ParrotGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
+    @staticmethod
+    def get_type():
+        return GlobalSchedulerType.PARROT
 
 @dataclass
 class BaseExecutionTimePredictorConfig(BasePolyConfig):
@@ -780,6 +808,8 @@ class SimulationConfig(ABC):
                 instance.cluster_config.replica_scheduler_config
             )
             instance.cluster_config = heter_cluster_config
+            # 重新写入配置文件，因为cluster_config已经改变
+            instance.write_config_to_file()
         return instance
 
     def to_dict(self):

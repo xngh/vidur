@@ -109,8 +109,9 @@ class SharpGlobalScheduler(BaseGlobalScheduler):
                 )
             estimated_queue_time[replica_id] = queue_time
 
-        exec_weight = 1.0
-        queue_weight = 0.1
+        gs_cfg = self._config.cluster_config.global_scheduler_config
+        exec_weight = getattr(gs_cfg, "exec_weight", 1.0)
+        queue_weight = getattr(gs_cfg, "queue_weight", 0.6)
 
         while self._request_queue:
             request = self._request_queue.pop(0)

@@ -125,6 +125,7 @@ class AgentSimulator:
         logger.info("Writing output")
 
         self._metric_store.plot()
+        self._metric_store.export_result_json()
         logger.info("Metrics written")
 
         if self._config.metrics_config.write_json_trace:

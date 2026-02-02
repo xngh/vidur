@@ -8,6 +8,7 @@ from vidur.scheduler.global_scheduler.round_robin_global_scheduler import (
 from vidur.scheduler.global_scheduler.sharp_global_scheduler import SharpGlobalScheduler
 from vidur.types import GlobalSchedulerType
 from vidur.utils.base_registry import BaseRegistry
+from vidur.scheduler.global_scheduler.parrot_global_scheduler import ParrotGlobalScheduler
 
 
 class GlobalSchedulerRegistry(BaseRegistry):
@@ -22,3 +23,4 @@ GlobalSchedulerRegistry.register(
 )
 GlobalSchedulerRegistry.register(GlobalSchedulerType.LOR, LORGlobalScheduler)
 GlobalSchedulerRegistry.register(GlobalSchedulerType.SHARP, SharpGlobalScheduler)
+GlobalSchedulerRegistry.register(GlobalSchedulerType.PARROT, ParrotGlobalScheduler)

@@ -20,11 +20,11 @@ class ParrotGlobalScheduler(BaseGlobalScheduler):
             request = self._request_queue.pop(0)
 
             if isinstance(request, FullRequest) and request.parent_unified_request is not None:
-                if request.parent_unified_request.workflow_id in self.session_register:
-                    replica_id = self.session_register[request.parent_unified_request.workflow_id]
+                if request.parent_unified_request.session_id in self.session_register:
+                    replica_id = self.session_register[request.parent_unified_request.session_id]
                 else:
                     replica_id = self._request_counter % self._num_replicas
-                    self.session_register[request.parent_unified_request.workflow_id] = replica_id
+                    self.session_register[request.parent_unified_request.session_id] = replica_id
                 self._request_counter += 1
                 request_mapping.append((replica_id, request))
 

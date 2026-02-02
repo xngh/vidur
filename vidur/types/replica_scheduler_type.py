@@ -8,3 +8,4 @@ class ReplicaSchedulerType(BaseIntEnum):
     VLLM = 4
     LIGHTLLM = 5
     LOCAL = 6
+    SLO = 7
