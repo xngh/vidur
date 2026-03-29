@@ -6,3 +6,5 @@ class RequestGeneratorType(BaseIntEnum):
     TRACE_REPLAY = 2
     UNIFIED = 3
     MAPREDUCE = 4
+    CODE = 5
+    MIXED = 6

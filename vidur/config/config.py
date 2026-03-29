@@ -298,6 +298,71 @@ class MapReduceRequestGeneratorConfig(BaseRequestGeneratorConfig):
     @staticmethod
     def get_type():
         return RequestGeneratorType.MAPREDUCE
+    
+@dataclass
+class MixAgentRequestGeneratorConfig(BaseRequestGeneratorConfig):
+    sharegpt_trace_file: str = field(
+        default="data/sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json",
+        metadata={"help": "Path to the sharegpt trace file."},
+    )
+    map_reduce_trace_file: str = field(
+        default="data/map_reduce/MapReduceTraceNew.json",
+        metadata={"help": "Path to the map-reduce trace file."},
+    )
+    code_trace_file: str = field(
+        default="data/code_agent_traces/CodeAgentTrace_Diversified_v3.json",
+        metadata={"help": "Path to the code-agent trace file."},
+    )
+    num_workflows: int = field(
+        default=100,
+        metadata={"help": "Total number of workflows (N) to generate."},
+    )
+    code_ratio: float = field(
+        default=0.34,
+        metadata={"help": "Fraction of workflows from the code dataset."},
+    )
+    sharegpt_ratio: float = field(
+        default=0.33,
+        metadata={"help": "Fraction of workflows from the sharegpt dataset. mapreduce = 1 - code_ratio - sharegpt_ratio."},
+    )
+    start_time: float = field(
+        default=0.0,
+        metadata={"help": "Start time for the request generator."},
+    )
+    interval_generator_config: PoissonRequestIntervalGeneratorConfig = field(
+        default_factory=PoissonRequestIntervalGeneratorConfig,
+        metadata={"help": "Config for the PoissonRequestIntervalGenerator."},
+    )
+    max_tokens: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the trace request generator."},
+    )
+
+    @staticmethod
+    def get_type():
+        return RequestGeneratorType.MIXED
+    
+@dataclass
+class CodeAgentRequestGeneratorConfig(BaseRequestGeneratorConfig):
+    trace_file: str = field(
+        default="data/code_agent_traces/CodeAgentTrace_Diversified_v3.json",
+    )
+    start_time: float = field(
+        default=0.0,
+        metadata={"help": "Start time for the code agent request generator."},
+    )
+    interval_generator_config: PoissonRequestIntervalGeneratorConfig = field(
+        default_factory=PoissonRequestIntervalGeneratorConfig,
+        metadata={"help": "Config for the PoissonRequestIntervalGenerator."},
+    )
+    max_tokens: int = field(
+        default=4096,
+        metadata={"help": "Maximum tokens for the trace request generator."},
+    )
+
+    @staticmethod
+    def get_type():
+        return RequestGeneratorType.CODE
 
 @dataclass
 class BaseReplicaSchedulerConfig(BasePolyConfig):
@@ -575,7 +640,7 @@ class SharpGlobalSchedulerConfig(BaseGlobalSchedulerConfig):
         metadata={"help": "Weight for request execution time in SharpGlobalScheduler."},
     )
     queue_weight: float = field(
-        default=0.1,
+        default=0.2,
         metadata={"help": "Weight for estimated queue time in SharpGlobalScheduler."},
     )
 

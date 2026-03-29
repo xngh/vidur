@@ -557,21 +557,33 @@ class MetricsStore:
 
         You can freely edit/extend this function to add more metrics to result.json.
         """
+        workflow_e2e_latency = self._percentiles_from_dataseries(
+            self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_TIME], [0.50, 0.90]
+        )
+        workflow_e2e_latency["mean"] = self._mean_from_dataseries(
+            self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_TIME]
+        )
+
+        request_e2e_latency = self._percentiles_from_dataseries(
+            self._request_metrics_time_distributions[
+                RequestMetricsTimeDistributions.REQUEST_E2E_TIME
+            ],
+            [0.50, 0.90],
+        )
+        request_e2e_latency["mean"] = self._mean_from_dataseries(
+            self._request_metrics_time_distributions[
+                RequestMetricsTimeDistributions.REQUEST_E2E_TIME
+            ]
+        )
+
         result: Dict = {
             # workflow-level
-            "workflow_e2e_latency": self._percentiles_from_dataseries(
-                self._workflow_metrics[WorkflowMetrics.WORKFLOW_E2E_TIME], [0.50, 0.90]
-            ),
+            "workflow_e2e_latency": workflow_e2e_latency,
             "workflow_slo_attainment": self._mean_from_dataseries(
                 self._workflow_metrics[WorkflowMetrics.WORKFLOW_SLO_ATTAINMENT]
             ),
             # request-level (useful proxies, includes prefill)
-            "request_e2e_latency": self._percentiles_from_dataseries(
-                self._request_metrics_time_distributions[
-                    RequestMetricsTimeDistributions.REQUEST_E2E_TIME
-                ],
-                [0.50, 0.90],
-            ),
+            "request_e2e_latency": request_e2e_latency,
             "prefill_time_e2e": self._percentiles_from_dataseries(
                 self._request_metrics_time_distributions[
                     RequestMetricsTimeDistributions.PREFILL_TIME_E2E

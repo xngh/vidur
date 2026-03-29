@@ -55,7 +55,8 @@ class BatchEndEvent(BaseEvent):
             self.time, self._batch, self._replica_id, memory_usage_percent
         )
 
-        return [ReplicaScheduleEvent(self.time, self._replica_id)] + new_request_events
+        from vidur.events.global_schedule_event import GlobalScheduleEvent
+        return [ReplicaScheduleEvent(self.time, self._replica_id), GlobalScheduleEvent(self.time)] + new_request_events
 
     def to_dict(self):
         return {

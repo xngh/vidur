@@ -199,6 +199,7 @@ def train_model(args):
         num_buckets=args.num_buckets,
         num_task_types=args.num_task_types,
         freeze_bert=args.freeze_bert,
+        unfreeze_bert_layers=args.unfreeze_bert_layers,
     )
     
     tokenizer = AutoTokenizer.from_pretrained(config.model_name)
@@ -215,7 +216,7 @@ def train_model(args):
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     
     # 4. 优化器与损失函数
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     criterion = nn.CrossEntropyLoss()
     
     # 5. 训练循环
@@ -287,8 +288,10 @@ if __name__ == "__main__":
     parser.add_argument("--num_buckets", type=int, default=4)
     parser.add_argument("--num_task_types", type=int, default=3)
     parser.add_argument("--freeze_bert", action="store_true", default=True)
+    parser.add_argument("--unfreeze_bert_layers", type=int, default=0)
     parser.add_argument("--max_length", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--val_ratio", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)

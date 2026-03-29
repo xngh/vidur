@@ -175,12 +175,13 @@ def main():
     )
     parser.add_argument(
         "--output_path",
-        default="/home/linchx/vidur/data/processed_traces/workload_profiler_train_200_400_600_800_1000.jsonl",
+        default="/home/linchx/vidur/data/processed_traces/workload_profiler_train.jsonl",
         help="Output JSONL file.",
     )
     parser.add_argument(
         "--buckets",
-        default="200,400,600,800,1000",
+        # default="50,100,200,350",
+        default="40,120,250,340",
         help="Comma-separated bucket boundaries. Example: 50,200,500",
     )
     parser.add_argument(

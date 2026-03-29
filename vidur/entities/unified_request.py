@@ -22,6 +22,7 @@ class UnifiedRequest:
         workflow_config: List[Dict],  # 假设格式为: List[{"step": str, "input_str": str, "output_str": str}]
         max_token_for_request: int = 4096,
         deadline: float = 0.0,
+        agent_type: str = "chat",
     ):
         self.session_id = workflow_id.split("_")[0]
         self.workflow_id = workflow_id
@@ -44,6 +45,7 @@ class UnifiedRequest:
 
         self.context_information = ""
         self.deadline = deadline   # deadline是仿真中的绝对时间（arrive_at + slo = deadline）
+        self.agent_type = agent_type
 
     def _initialize_step_names(self):
         """

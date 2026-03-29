@@ -14,7 +14,9 @@ class WorkloadProfilerConfig:
         hidden_dim: int = 128,
         dropout_prob: float = 0.1,
         freeze_bert: bool = True,
-        use_prompt_len: bool = True,
+        unfreeze_bert_layers: int = 0,
+        use_task_type: bool = False,
+        use_prompt_len: bool = False,
     ):
         self.model_name = model_name
         self.num_buckets = num_buckets
@@ -24,6 +26,8 @@ class WorkloadProfilerConfig:
         self.hidden_dim = hidden_dim
         self.dropout_prob = dropout_prob
         self.freeze_bert = freeze_bert
+        self.unfreeze_bert_layers = unfreeze_bert_layers
+        self.use_task_type = use_task_type
         self.use_prompt_len = use_prompt_len
 
 class WorkloadProfiler(nn.Module):
@@ -67,16 +71,20 @@ class WorkloadProfiler(nn.Module):
         if config.freeze_bert:
             for param in self.bert.parameters():
                 param.requires_grad = False
+            if config.unfreeze_bert_layers > 0:
+                self._unfreeze_last_bert_layers(config.unfreeze_bert_layers)
         
         # 获取 BERT 输出维度 (通常是 768)
         self.text_hidden_size = self.bert.config.hidden_size
         
         # 2. 结构特征嵌入层 (Structural Embedding)
         # 简单的 Lookup Table，将任务类型 ID 映射为向量
-        self.task_type_embedding = nn.Embedding(
-            num_embeddings=config.num_task_types, 
-            embedding_dim=config.embedding_dim
-        )
+        self.use_task_type = config.use_task_type
+        if self.use_task_type:
+            self.task_type_embedding = nn.Embedding(
+                num_embeddings=config.num_task_types,
+                embedding_dim=config.embedding_dim
+            )
 
         # 2.5 Prompt length feature projection (scalar -> vector)
         self.use_prompt_len = config.use_prompt_len
@@ -85,7 +93,9 @@ class WorkloadProfiler(nn.Module):
         
         # 3. 多模态融合与推理 (Fusion & Inference)
         # 融合后的特征维度
-        combined_dim = self.text_hidden_size + config.embedding_dim
+        combined_dim = self.text_hidden_size
+        if self.use_task_type:
+            combined_dim += config.embedding_dim
         if self.use_prompt_len:
             combined_dim += config.prompt_len_dim
         
@@ -96,12 +106,29 @@ class WorkloadProfiler(nn.Module):
             nn.Dropout(config.dropout_prob),
             nn.Linear(config.hidden_dim, config.num_buckets)
         )
+
+    def _get_bert_layers(self):
+        # Support common HF encoder layouts (BERT/DistilBERT/Roberta).
+        if hasattr(self.bert, "encoder") and hasattr(self.bert.encoder, "layer"):
+            return list(self.bert.encoder.layer)
+        if hasattr(self.bert, "transformer") and hasattr(self.bert.transformer, "layer"):
+            return list(self.bert.transformer.layer)
+        return []
+
+    def _unfreeze_last_bert_layers(self, num_layers: int) -> None:
+        layers = self._get_bert_layers()
+        if not layers:
+            return
+        num_layers = min(num_layers, len(layers))
+        for layer in layers[-num_layers:]:
+            for param in layer.parameters():
+                param.requires_grad = True
         
     def forward(
         self, 
         input_ids: torch.Tensor, 
         attention_mask: torch.Tensor, 
-        task_type_ids: torch.Tensor,
+        task_type_ids: Optional[torch.Tensor] = None,
         prompt_len: torch.Tensor = None,
     ) -> torch.Tensor:
         """
@@ -123,10 +150,14 @@ class WorkloadProfiler(nn.Module):
         text_features = outputs.last_hidden_state[:, 0, :] # [batch_size, text_hidden_size]
         
         # --- 2. 提取结构特征 ---
-        task_features = self.task_type_embedding(task_type_ids) # [batch_size, embedding_dim]
+        features = [text_features]
+        if self.use_task_type:
+            if task_type_ids is None:
+                raise ValueError("task_type_ids is required when use_task_type=True")
+            task_features = self.task_type_embedding(task_type_ids) # [batch_size, embedding_dim]
+            features.append(task_features)
         
         # --- 3. 特征融合 ---
-        features = [text_features, task_features]
         if self.use_prompt_len:
             if prompt_len is None:
                 raise ValueError("prompt_len is required when use_prompt_len=True")
@@ -144,7 +175,7 @@ class WorkloadProfiler(nn.Module):
         
         return logits
 
-    def predict(self, input_ids, attention_mask, task_type_ids, prompt_len=None):
+    def predict(self, input_ids, attention_mask, task_type_ids=None, prompt_len=None):
         """用于推理的辅助方法，返回预测的 bucket 索引"""
         self.eval()
         with torch.no_grad():

@@ -45,19 +45,46 @@ BASE_ARGS: Dict[str, object] = {
     "random_forrest_execution_time_predictor_config_prediction_max_batch_size": 512,
     "random_forrest_execution_time_predictor_config_prediction_max_tokens_per_request": 16384,
     "local_replica_scheduler_config_batch_size_cap": 512,
+    # ---- mix agent generator 参数 ----
+    "mix_agent_request_generator_config_num_workflows": 300,
+    "mix_agent_request_generator_config_code_ratio": 0.34,
+    "mix_agent_request_generator_config_sharegpt_ratio": 0.33,
+    # mapreduce_ratio 自动算出 = 1 - code_ratio - sharegpt_ratio = 0.33
+    "mix_agent_request_generator_config_max_tokens": 16384,
 }
 
-# Only these four are expected to vary most often; extend freely.
+# BASE_ARGS: Dict[str, object] = {
+#     "replica_config_device": "a100",
+#     "replica_config_model_name": "meta-llama/Meta-Llama-3-8B",
+#     # "cluster_config_replica_configs": json.dumps(
+#     #     [
+#     #         {
+#     #             "device": "a100",
+#     #             "network_device": "a100_pairwise_nvlink",
+#     #             "model_name": "meta-llama/Llama-2-7b-hf",
+#     #             "count": 4,
+#     #         },
+#     #     ]
+#     # ),
+#     "cluster_config_num_replicas": 4,
+#     "replica_config_tensor_parallel_size": 1,
+#     "replica_config_num_pipeline_stages": 1,
+#     "share_g_p_t_request_generator_config_max_tokens": 16384,
+#     "random_forrest_execution_time_predictor_config_prediction_max_prefill_chunk_size": 16384,
+#     "random_forrest_execution_time_predictor_config_prediction_max_batch_size": 512,
+#     "random_forrest_execution_time_predictor_config_prediction_max_tokens_per_request": 16384,
+#     "local_replica_scheduler_config_batch_size_cap": 512,
+# }
+
+# Only these are expected to vary most often; extend freely.
 # 对这几个参数的列表里的属性，做笛卡尔积后进行批量实验.
 VARIANTS: Dict[str, List[object]] = {
     # e.g. ["parrot", "round_robin", "sharp"]
-    "global_scheduler_config_type": ["sharp","parrot"],
-    # e.g. ["unified", "synthetic"]
-    "request_generator_config_type": ["mapreduce"],
-    # e.g. ["local", "slo"]
-    "replica_scheduler_config_type": ["local"],
+    "global_scheduler_config_type": ["sharp","parrot","round_robin","lor"],
+    # e.g. ["unified", "synthetic", "mapreduce", "mixed"]
+    "request_generator_config_type": ["mixed"],
     # e.g. [1, 2, 5, 10]
-    "poisson_request_interval_generator_config_qps": [5,6,7],
+    "poisson_request_interval_generator_config_qps": [1,2,3,4,5],
 }
 
 # Optional: put all runs under a subfolder to keep outputs together.
@@ -71,6 +98,13 @@ def build_experiments(base_args: Dict[str, object], variants: Dict[str, List[obj
     for values in values_product:
         params = dict(base_args)
         params.update(dict(zip(keys, values)))
+        # Conditional override:
+        # If global scheduler is sharp -> use slo replica scheduler,
+        # else use local replica scheduler.
+        if params.get("global_scheduler_config_type") == "sharp":
+            params["replica_scheduler_config_type"] = "slo"
+        else:
+            params["replica_scheduler_config_type"] = "local"
         yield params
 
 

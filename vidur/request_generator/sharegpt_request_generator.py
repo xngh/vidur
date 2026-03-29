@@ -22,9 +22,9 @@ class ShareGPTRequestGenerator(BaseRequestGenerator):
 
         # NOTE: 以下分位点为示例占位值，可根据最新仿真数据替换
         # 单位: 秒；假设为 ShareGPT 对话型请求的 e2e runtime P50/P70/P90
-        self._p50_runtime = 1.0
-        self._p70_runtime = 2.0
-        self._p90_runtime = 4.0
+        self._p50_runtime = 5.0  
+        self._p70_runtime = 8.0
+        self._p90_runtime = 12.0
         
          #设置一个随机数种子，保证deadline生成是可复现的。
         seed = getattr(config, "seed", None) or config.get("seed", None)
